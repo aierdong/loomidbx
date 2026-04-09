@@ -1,0 +1,1 @@
+Please refer to CLAUDE.md for project rules.
