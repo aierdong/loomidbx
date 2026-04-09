@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LoomiDBX - UI Design Reference</title>
+    <link rel="stylesheet" href="loomidbx_ui_theme.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono&display=swap" rel="stylesheet">
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        .app-container {
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        .titlebar {
+            height: 32px;
+            background: var(--surface);
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 var(--spacing-md);
+            -webkit-app-region: drag;
+        }
+
+        .titlebar-title {
+            font-size: var(--font-sm);
+            font-weight: var(--font-medium);
+        }
+
+        .titlebar-controls {
+            display: flex;
+            gap: var(--spacing-sm);
+            -webkit-app-region: no-drag;
+        }
+
+        .menubar {
+            height: 32px;
+            background: var(--surface);
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            padding: 0 var(--spacing-md);
+            gap: var(--spacing-lg);
+        }
+
+        .menu-item {
+            font-size: var(--font-sm);
+            color: var(--text-primary);
+            cursor: pointer;
+            padding: var(--spacing-xs) var(--spacing-sm);
+            border-radius: var(--radius-sm);
+        }
+
+        .menu-item:hover {
+            background: var(--surface-hover);
+        }
+
+        .main-content {
+            display: flex;
+            flex: 1;
+            overflow: hidden;
+        }
+
+        .sidebar {
+            width: 280px;
+            background: var(--surface);
+            border-right: 1px solid var(--border);
+            display: flex;
+            flex-direction: column;
+        }
+
+        .sidebar-header {
+            padding: var(--spacing-md);
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            gap: var(--spacing-sm);
+        }
+
+        .sidebar-content {
+            flex: 1;
+            overflow-y: auto;
+            padding: var(--spacing-sm);
+        }
+
+        .tree-item {
+            padding: 6px var(--spacing-sm);
+            margin: 2px 0;
+            border-radius: var(--radius-sm);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: var(--spacing-sm);
+            font-size: var(--font-sm);
+        }
+
+        .tree-item:hover {
+            background: var(--surface-hover);
+        }
+
+        .tree-item.selected {
+            background: var(--primary-light);
+            color: var(--primary);
+        }
+
+        .tree-children {
+            margin-left: 20px;
+        }
+
+        .workspace {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            background: var(--background);
+        }
+
+        .tabs-container {
+            background: var(--surface);
+            border-bottom: 1px solid var(--border);
+            display: flex;
+        }
+
+        .tab {
+            padding: var(--spacing-md) var(--spacing-lg);
+            border-bottom: 2px solid transparent;
+            cursor: pointer;
+            font-size: var(--font-sm);
+            color: var(--text-secondary);
+        }
+
+        .tab.active {
+            color: var(--primary);
+            border-bottom-color: var(--primary);
+            font-weight: var(--font-medium);
+        }
+
+        .tab-content {
+            flex: 1;
+            overflow-y: auto;
+            padding: var(--spacing-lg);
+        }
+
+        .statusbar {
+            height: 24px;
+            background: var(--surface);
+            border-top: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            padding: 0 var(--spacing-md);
+            gap: var(--spacing-lg);
+            font-size: var(--font-xs);
+            color: var(--text-secondary);
+        }
+    </style>
+</head>
+<body>
+    <div class="app-container">
+        <!-- Titlebar -->
+        <div class="titlebar">
+            <div class="titlebar-title">LoomiDBX</div>
+            <div class="titlebar-controls">
+                <button class="btn-icon">_</button>
+                <button class="btn-icon">□</button>
+                <button class="btn-icon">×</button>
+            </div>
+        </div>
+
+        <!-- Menubar -->
+        <div class="menubar">
+            <div class="menu-item">File</div>
+            <div class="menu-item">Edit</div>
+            <div class="menu-item">Tools</div>
+            <div class="menu-item">Generate</div>
+            <div class="menu-item">Help</div>
+        </div>
+
+        <!-- Main Content -->
+        <div class="main-content">
+            <!-- Sidebar -->
+            <div class="sidebar">
+                <div class="sidebar-header">
+                    <button class="btn-icon" title="New Connection">
+                        <i data-lucide="plus"></i>
+                    </button>
+                    <button class="btn-icon" title="Scan Schema">
+                        <i data-lucide="refresh-cw"></i>
+                    </button>
+                    <button class="btn-icon" title="Generate Data">
+                        <i data-lucide="play"></i>
+                    </button>
+                </div>
+                <div class="sidebar-content">
+                    <div class="tree-item">
+                        <input type="checkbox">
+                        <i data-lucide="chevron-down" style="width:16px;height:16px"></i>
+                        <i data-lucide="database" style="width:16px;height:16px"></i>
+                        <span>MySQL-Local</span>
+                    </div>
+                    <div class="tree-children">
+                        <div class="tree-item">
+                            <input type="checkbox">
+                            <i data-lucide="chevron-down" style="width:16px;height:16px"></i>
+                            <i data-lucide="folder" style="width:16px;height:16px"></i>
+                            <span>ecommerce</span>
+                        </div>
+                        <div class="tree-children">
+                            <div class="tree-item selected">
+                                <input type="checkbox" checked>
+                                <i data-lucide="table" style="width:16px;height:16px"></i>
+                                <span>orders</span>
+                            </div>
+                            <div class="tree-item">
+                                <input type="checkbox" checked>
+                                <i data-lucide="table" style="width:16px;height:16px"></i>
+                                <span>users</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Workspace -->
+            <div class="workspace">
+                <div class="tabs-container">
+                    <div class="tab active">orders</div>
+                    <div class="tab">products</div>
+                    <div class="tab">users</div>
+                </div>
+                <div class="tab-content">
+                    <div class="panel">
+                        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:var(--spacing-lg)">
+                            <div>
+                                <h3>orders</h3>
+                                <div style="color:var(--text-secondary);font-size:var(--font-sm)">订单主表</div>
+                            </div>
+                            <button class="btn-secondary">
+                                <i data-lucide="refresh-cw" style="width:16px;height:16px"></i>
+                                Rescan
+                            </button>
+                        </div>
+
+                        <div style="display:flex;gap:var(--spacing-lg);margin-bottom:var(--spacing-lg)">
+                            <div>
+                                <label style="font-size:var(--font-sm);color:var(--text-secondary)">Generate Count</label>
+                                <input type="number" class="input" value="10000" style="width:120px">
+                            </div>
+                            <div style="display:flex;align-items:center;gap:var(--spacing-sm)">
+                                <input type="checkbox" checked>
+                                <label style="font-size:var(--font-sm)">Truncate Before</label>
+                            </div>
+                        </div>
+
+                        <details open style="margin-bottom:var(--spacing-lg)">
+                            <summary style="cursor:pointer;font-weight:var(--font-medium);margin-bottom:var(--spacing-sm)">
+                                Relationships
+                            </summary>
+                            <div style="padding-left:var(--spacing-lg);font-size:var(--font-sm)">
+                                <div style="margin-bottom:var(--spacing-sm)">
+                                    <strong>Foreign Keys (2)</strong>
+                                    <div style="color:var(--text-secondary);margin-left:var(--spacing-lg)">
+                                        • user_id → users.id (1:N)<br>
+                                        • product_id → products.id (1:N)
+                                    </div>
+                                </div>
+                                <div>
+                                    <strong>Logical Keys (1)</strong>
+                                    <div style="color:var(--text-secondary);margin-left:var(--spacing-lg)">
+                                        • warehouse_id → warehouses.id (1:N)
+                                    </div>
+                                </div>
+                            </div>
+                        </details>
+
+                        <h4 style="margin-bottom:var(--spacing-md)">Fields</h4>
+                        <table class="table">
+                            <thead>
+                                <tr>
+                                    <th style="width:40px"></th>
+                                    <th>Name</th>
+                                    <th>Type</th>
+                                    <th>Key</th>
+                                    <th>Null</th>
+                                    <th>Generator</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr class="selected">
+                                    <td><input type="checkbox" checked></td>
+                                    <td>
+                                        <div>id</div>
+                                        <div style="color:var(--text-tertiary);font-size:var(--font-xs)">订单ID</div>
+                                    </td>
+                                    <td>INT</td>
+                                    <td><span style="color:var(--primary)">PK</span></td>
+                                    <td>✗</td>
+                                    <td>Sequence</td>
+                                </tr>
+                                <tr>
+                                    <td><input type="checkbox" checked></td>
+                                    <td>
+                                        <div>order_no</div>
+                                        <div style="color:var(--text-tertiary);font-size:var(--font-xs)">订单编号</div>
+                                    </td>
+                                    <td>VARCHAR(32)</td>
+                                    <td><span style="color:var(--warning)">UNI</span></td>
+                                    <td>✗</td>
+                                    <td>Pattern</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Statusbar -->
+        <div class="statusbar">
+            <span>● Connected: MySQL-Local/ecommerce</span>
+            <span>|</span>
+            <span>Selected: 2 tables</span>
+            <span>|</span>
+            <span>Ready to generate</span>
+        </div>
+    </div>
+
+    <script>
+        lucide.createIcons();
+    </script>
+</body>
+</html>
