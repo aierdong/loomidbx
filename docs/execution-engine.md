@@ -36,6 +36,15 @@ Flutter 向导 UI  <──FFI JSON──>  Go 动态库 (libloomidbx)
 
 ---
 
+## 一点五、MVP 执行口径（2026-04-13 决议）
+
+- 事务策略基准为 `txPerBatch=true`（每批事务）；全任务单事务仅作为可选扩展，不参与性能承诺口径。
+- 性能口径固定为：不包含外部数据源调用、不包含计算字段（SQL/Python）、包含唯一性约束检查。
+- 可复现能力以全局 seed 为基线能力，运行记录中应可追溯本次 seed（用于测试复盘与问题复现）。
+- 并行生成优化、断点续传等保持在后续扩展项，不作为当前阶段阻塞项。
+
+---
+
 ## 二、依赖图与拓扑排序
 
 ### 2.1 依赖来源
@@ -44,9 +53,9 @@ Flutter 向导 UI  <──FFI JSON──>  Go 动态库 (libloomidbx)
 
 | 来源 | 数据结构 | 特征 |
 |---|---|---|
-| 物理外键 | `column_schemas.fk_ref_table` / `fk_ref_column` | 数据库 DDL 定义，强约束 |
-| 逻辑外键 | `column_gen_configs.logic_fk_table` / `logic_fk_column` | 用户手动指定，作用同物理外键 |
-| 表间数量关系 | `table_relations.from_table_id` → `to_table_id` | 独立表，描述行数倍数约定 |
+| 物理外键 | `ldb_column_schemas.fk_ref_table` / `fk_ref_column` | 数据库 DDL 定义，强约束 |
+| 逻辑外键 | `ldb_column_gen_configs.logic_fk_table` / `logic_fk_column` | 用户手动指定，作用同物理外键 |
+| 表间数量关系 | `ldb_table_relations.from_table_id` → `to_table_id` | 独立表，描述行数倍数约定 |
 
 **判定规则**：若表 A 存在（物理或逻辑）外键指向表 B，则 A **依赖** B，B 必须先生成。
 
@@ -203,13 +212,13 @@ func TopologicalSort(dg *DependencyGraph) (*topoResult, error) {
 
 | 场景 | 产品决策 |
 |---|---|
-| B 未勾选但存在生成配置（`table_gen_configs.is_enabled=1`） | **自动补入**向导表列表，标记为「隐式依赖」，用户可见行数设置，可修改但不可取消勾选 |
+| B 未勾选但存在生成配置（`ldb_table_gen_configs.is_enabled=1`） | **自动补入**向导表列表，标记为「隐式依赖」，用户可见行数设置，可修改但不可取消勾选 |
 | B 未勾选且无生成配置 | **阻止生成**，提示："表 A 依赖表 B，但表 B 尚未配置生成规则。请先配置表 B 或取消表 A 的勾选。" |
 | B 用户勾选但 `truncate_before=1`，A 依赖 B | **风险提示**："表 B 将执行 Truncate，其数据被清空后表 A 的外键值将无来源。是否继续？" |
 
 #### 可选表（Optional）
 
-`table_relations.relation_type = "1:0-1"` 表示子表可选：
+`ldb_table_relations.relation_type = "1:0-1"` 表示子表可选：
 
 | 场景 | 行数规则 |
 |---|---|
@@ -223,7 +232,7 @@ Planner 里会出现两处「排序 / 依赖图」，若不写清容易与 orche
 
 | 层级 | 图里节点是什么 | 边表示什么 | 解决什么问题 |
 |------|----------------|-----------|----------------|
-| **表级**（§2.1–§2.3） | 表 | 外键 / 逻辑外键 / `table_relations` | 哪张表必须先于哪张表生成，父表 ID 池先于子表外键采样 |
+| **表级**（§2.1–§2.3） | 表 | 外键 / 逻辑外键 / `ldb_table_relations` | 哪张表必须先于哪张表生成，父表 ID 池先于子表外键采样 |
 | **表内字段级**（见 `docs/computed-field-research.md` §一） | 同一表内的列 | `${column}` 引用、计算列之间依赖 | 单行内先算被引用列，再算 SQL/Python 计算列；**不**承担跨表依赖（跨表由外键与表级拓扑解决） |
 
 **执行引擎如何拼在一起**（单条叙事）：
@@ -312,7 +321,7 @@ type TablePlan struct {
 
 | 关系类型 | 行数计算公式 | 向导交互 |
 |---|---|---|
-| **独立表**（无外键依赖） | `target_rows = user_input` | 用户直接输入，默认 `table_gen_configs.gen_count` |
+| **独立表**（无外键依赖） | `target_rows = user_input` | 用户直接输入，默认 `ldb_table_gen_configs.gen_count` |
 | **1:1 关系** | `target_rows(子) = target_rows(主)` | 子表行数自动锁定，向导中显示为灰色（不可编辑），显示 "= 主表行数" |
 | **1:0-1 关系** | `子记录数 = 对每条主记录 Bernoulli(p) 后求和` | 用户输入生成概率 `p`（0-1），系统对每条主记录独立决定是否生成子记录，保证「每父至多一子」 |
 | **1:n 关系** | `target_rows(子) = target_rows(主) × rand(min, max)` | 用户输入倍数区间 [min, max]，向导显示预估区间 |
@@ -354,7 +363,7 @@ func CalculateTargetRows(
             // 对每条主记录独立 Bernoulli 试验，保证「每父至多一子」
             // 用户配置生成概率 p（默认 0.5），实际子表行数 = sum(Bernoulli(p) for each parent)
             p := 0.5                                            // 默认概率
-            if rel.OptionalProbability != nil {                 // table_relations.optional_probability
+            if rel.OptionalProbability != nil {                 // ldb_table_relations.optional_probability
                 p = *rel.OptionalProbability
             }
             if wt, ok := wizardTablePlans[tableID]; ok && wt.OptionalProb != nil {
@@ -388,7 +397,7 @@ func CalculateTargetRows(
       - 中间表行数 = 左主表行数 × [min, max]
       
   (2) 无中间表（仅逻辑关系）：需用户指定关系表
-      - table_relations 中标记 relation_type = "m:n"
+      - ldb_table_relations 中标记 relation_type = "m:n"
       - 需关联一个已存在的中间表 Schema
 ```
 
@@ -618,7 +627,7 @@ type Progress struct {
 
 | 策略 | 配置 | 适用场景 | 失败处理 |
 |---|---|---|---|
-| **每批独立事务** | `txPerBatch=true`（默认） | 海量数据生成（百万级） | 失败批次回滚，已提交批次保留，停止后续批次 |
+| **每批独立事务** | `txPerBatch=true`（默认，MVP 基线） | 海量数据生成（百万级） | 失败批次回滚，已提交批次保留，停止后续批次 |
 | **全任务单事务** | `txPerBatch=false` | 小数据量（<10万），追求完整性 | 失败回滚全部，重新执行 |
 
 **产品交互（向导高级选项）**：
@@ -1219,16 +1228,16 @@ if ctx.Err() == context.DeadlineExceeded {
 
 ## 六、运行历史
 
-### 6.1 与 scan_history 的边界
+### 6.1 与 ldb_scan_history 的边界
 
-| 维度 | `scan_history` | `generation_runs`（新增） |
+| 维度 | `ldb_scan_history` | `generation_runs`（新增） |
 |---|---|---|
 | **触发时机** | Schema 扫描（全库/单表） | 数据生成执行 |
 | **粒度** | 单次扫描行为 | 单次生成任务（含多表） |
 | **关注点** | Schema 版本、Diff | 行数、耗时、成功/失败状态 |
 | **关联** | `scan_history_id` 可关联到当时的 Schema 版本 | `generation_runs` 独立表 |
 
-**设计原则**：`generation_runs` 与 `scan_history` **独立存储**，不建立强外键关联，避免跨域耦合。
+**设计原则**：`generation_runs` 与 `ldb_scan_history` **独立存储**，不建立强外键关联，避免跨域耦合。
 
 ### 6.2 元数据表设计
 
@@ -1248,7 +1257,7 @@ CREATE TABLE generation_runs (
     external_calls  TEXT,                          -- JSON: 外部调用聚合（脱敏 URL、状态码、计数）
     error_message   TEXT,                          -- 失败时的错误摘要
     user_cancelled  INTEGER DEFAULT 0,             -- 是否用户主动取消
-    FOREIGN KEY (connection_id) REFERENCES connections(id)
+    FOREIGN KEY (connection_id) REFERENCES ldb_connections(id)
 );
 
 -- 新增：运行明细（每表一行）
@@ -1269,7 +1278,7 @@ CREATE TABLE generation_run_tables (
     error_message   TEXT,
     is_implicit     INTEGER DEFAULT 0,             -- 是否隐式补入
     FOREIGN KEY (run_id) REFERENCES generation_runs(id),
-    FOREIGN KEY (table_schema_id) REFERENCES table_schemas(id)
+    FOREIGN KEY (table_schema_id) REFERENCES ldb_table_schemas(id)
 );
 
 -- 新增：运行日志（可选，用于详细审计）
@@ -1677,7 +1686,7 @@ func resetSequence(connector Connector, tableName string) {
 | **进度回调** | 流式回调而非阻塞 | 实时反馈，支持取消 |
 | **批次流水线** | generation 与 writing 交替/并发 | 提升吞吐，Progress 多状态并存 |
 | **取消机制** | context.Context + CancelFunc | Go 标准模式 |
-| **运行历史** | 独立 generation_runs 表，与 scan_history 解耦 | 避免跨域耦合 |
+| **运行历史** | 独立 ldb_generation_runs 表，与 ldb_scan_history 解耦 | 避免跨域耦合 |
 | **ID 池契约** | 父表全部完成后子表才开始生成 | 避免跨批次协调复杂度 |
 | **唯一约束** | 内存池 + 重试机制，耗尽报错 | 保证数据质量，避免写入失败 |
 | **标识符引用** | 所有 DML/DDL 使用 `quoteIdentifier` | 防保留字冲突，支持 schema 前缀 |

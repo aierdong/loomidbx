@@ -19,12 +19,12 @@ Flutter UI  ← FFI(JSON) →  libloomidbx (Go)
                     Connector │ Scanner │ Mapper
                               ↓
                     Storage Driver（应用元数据持久化）
-                    schema_migrations
+                    ldb_schema_migrations
 ```
 
 - **Connector**：各目标库的建连、`List*`、`DescribeTable`、`GetForeignKeys`；隔离驱动差异。
 - **Scanner**：`RawColumn` → 抽象类型、自增识别、与快照表同步、**Diff**。
-- **Mapper**：扫描结果 → `column_gen_configs` / `table_gen_configs` / `table_relations` 的自动映射与优先级。
+- **Mapper**：扫描结果 → `ldb_column_gen_configs` / `ldb_table_gen_configs` / `ldb_table_relations` 的自动映射与优先级。
 - **StorageDriver**：LoomiDBX **自身**元数据 DB（非业务库）的 DDL 方言抽象与 Migration；与「用户要连的业务库」区分。
 
 ---
@@ -41,12 +41,12 @@ Flutter UI  ← FFI(JSON) →  libloomidbx (Go)
 
 | 领域 | 表 | 要点 |
 |------|-----|------|
-| 连接 | `connections` | `db_type`、`extra` JSON；密码 **AES-256 落盘**，禁止明文。 |
-| 快照 | `table_schemas` / `column_schemas` | 按连接+库+（schema）+表/列存扫描结果；`scan_version` **按表**递增。 |
-| 生成配置 | `table_gen_configs` / `column_gen_configs` | `confirmed_at`：`NULL` = 待确认（UI 橙色），非空 = 已确认；自增列 `is_enabled=0`。 |
-| 表间数量 | `table_relations` | 与「列值从哪来」解耦；`relation_type`：`1:1` / `1:0-1` / `1:n` + `multiplier_*`。 |
-| 扫描审计 | `scan_history` / `scan_diffs` | `scan_scope`：`full_db` vs `single_table` + `scope_target`；diff 未确认前 `confirmed_at IS NULL`。 |
-| 运行历史 | `generation_runs` / `generation_run_tables` / `generation_run_logs` | **新增**：数据生成执行记录。与 `scan_history` 独立存储，避免跨域耦合。见 `steering/execution-engine.md`。 |
+| 连接 | `ldb_connections` | `db_type`、`extra` JSON；密码 **AES-256 落盘**，禁止明文。 |
+| 快照 | `ldb_table_schemas` / `ldb_column_schemas` | 按连接+库+（schema）+表/列存扫描结果；`scan_version` **按表**递增。 |
+| 生成配置 | `ldb_table_gen_configs` / `ldb_column_gen_configs` | `confirmed_at`：`NULL` = 待确认（UI 橙色），非空 = 已确认；自增列 `is_enabled=0`。 |
+| 表间数量 | `ldb_table_relations` | 与「列值从哪来」解耦；`relation_type`：`1:1` / `1:0-1` / `1:n` + `multiplier_*`。 |
+| 扫描审计 | `ldb_scan_history` / `ldb_scan_diffs` | `scan_scope`：`full_db` vs `single_table` + `scope_target`；diff 未确认前 `confirmed_at IS NULL`。 |
+| 运行历史 | `ldb_generation_runs` / `ldb_generation_run_tables` / `ldb_generation_run_logs` | 数据生成执行记录。与 `ldb_scan_history` 独立存储，避免跨域耦合。见 `steering/execution-engine.md`。 |
 
 抽象类型枚举：`int` / `string` / `decimal` / `datetime` / `boolean`（映射与 Fallback 以此为准）。
 
@@ -54,7 +54,7 @@ Flutter UI  ← FFI(JSON) →  libloomidbx (Go)
 
 ## 4. Connector 与扫描源
 
-- `DBType`：`mysql`、`postgres`、`oracle`、`mssql`、`sqlite`、`clickhouse`、`hive`（与 `connections.db_type` 一致）。
+- `DBType`：`mysql`、`postgres`、`oracle`、`mssql`、`sqlite`、`clickhouse`、`hive`（与 `ldb_connections.db_type` 一致）。
 - 各库实现从系统表/PRAGMA/`DESCRIBE` 等取列与外键（详设见 `docs/schema.md` 对照表）。
 - **自增识别**：综合 `extra`、`rawType`、`default`（如 `auto_increment`、`identity`、`serial`、`nextval`、SQLite 组合规则），统一进入 `DetectAutoIncrement`。
 
@@ -72,8 +72,8 @@ Flutter UI  ← FFI(JSON) →  libloomidbx (Go)
 
 - `DiffType`：`added` / `removed` / `modified`（及内部 `unchanged`）。
 - **新增列**：新建生成器，`confirmed_at = NULL`。
-- **删除列**：生成器禁用等处理 + `scan_diffs`，待用户确认。
-- **类型/约束变化**：可能重置待确认；**名称/注释-only**：静默更新，**不写** `scan_diffs`。
+- **删除列**：生成器禁用等处理 + `ldb_scan_diffs`，待用户确认。
+- **类型/约束变化**：可能重置待确认；**名称/注释-only**：静默更新，**不写** `ldb_scan_diffs`。
 
 ---
 
@@ -85,7 +85,7 @@ Flutter UI  ← FFI(JSON) →  libloomidbx (Go)
 4. **列名语义规则** → `mapper/semantic` 关键词表。
 5. **抽象类型 Fallback** → `generator_opts` 常设为 `"{}"`，默认值由生成器 `DefaultOpts()` 提供（便于升级默认行为而不迁库）。
 
-逻辑外键仅存 `column_gen_configs.logic_fk_*`，由用户确认写入。
+逻辑外键仅存 `ldb_column_gen_configs.logic_fk_*`，由用户确认写入。
 
 ---
 
@@ -111,7 +111,7 @@ Flutter UI  ← FFI(JSON) →  libloomidbx (Go)
 | 元数据多后端 | 环境变量 + `StorageDriver` + Migration |
 | Schema 版本 | `scan_version` 表粒度，全库/单表可并存 |
 | 用户确认状态 | 列级 `confirmed_at`，不用单独 `is_auto_mapped` |
-| 表间数量 vs 外键值 | `table_relations` vs `column_gen_configs` 分工 |
+| 表间数量 vs 外键值 | `ldb_table_relations` vs `ldb_column_gen_configs` 分工 |
 | FFI | JSON 优先于手写 C 结构体 |
 
 ---

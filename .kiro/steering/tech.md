@@ -16,7 +16,7 @@
 - **通信**: CGo (`-buildmode=c-shared`) + Dart FFI
 - **数据序列化**: JSON (`json-iterator` for Go)
 - **数据库驱动**: Go `database/sql` 标准包
-- **Python 表达式**: `github.com/go-python/gpython` (嵌入式，无需外部运行时)
+- **Python 表达式（后续阶段）**: `github.com/go-python/gpython` (嵌入式，无需外部运行时，MVP 不启用)
 - **配置存储**: SQLite (默认) 或用户指定数据库
 
 ## Key Libraries
@@ -24,7 +24,7 @@
 **Go 后端**:
 - `database/sql` - 数据库连接标准接口
 - `json-iterator` - 高性能 JSON 序列化
-- `github.com/go-python/gpython` - 嵌入式 Python 解释器（支持计算字段）
+- `github.com/go-python/gpython` - 嵌入式 Python 解释器（后续阶段用于 Python 计算字段）
 
 **Flutter 前端**:
 - `dart:ffi` - 调用 Go 动态库
@@ -114,14 +114,15 @@ go test ./...
 - 简化 Go Struct 与 Dart 类型映射
 - 开发效率优先，性能损失可接受（非热路径）
 
-**为什么嵌入 gpython 而非调用外部 Python？**
+**为什么规划嵌入 gpython 而非调用外部 Python？**
 - 避免依赖用户本机 Python 环境
 - 仅需支持标准库函数，嵌入式方案足够
+- 当前 MVP 只支持 SQL 计算表达式，Python 能力因复杂度控制而延后
 
 **配置持久化策略**
 - 默认 SQLite：零配置，开箱即用
 - 可选外部数据库：企业用户可集中管理配置
-- **表命名规范**：所有配置存储表必须使用 `ldb_` 前缀（如 `ldb_connections`、`ldb_schemas`、`ldb_generators`），与用户业务数据隔离
+- **表命名规范**：所有配置存储表必须使用 `ldb_` 前缀（如 `ldb_connections`、`ldb_table_schemas`、`ldb_column_gen_configs`），与用户业务数据隔离
 
 **数据库支持优先级**
 - Phase 1: MySQL, PostgreSQL, SQLite

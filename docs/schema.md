@@ -16,7 +16,7 @@ Flutter UI  <──FFI JSON──>  Go 动态库 (libloomidbx)
                           ├── MySQL
                           └── Postgres / ...
                                   │
-                          schema_migrations（版本管理）
+                          ldb_schema_migrations（版本管理）
 ```
 
 核心分三层：**连接层**（抽象不同数据库的连接差异）、**扫描层**（统一提取 Schema 元数据与 Diff）、**映射层**（根据字段信息自动推断生成器）。持久化层通过 Migration 机制动态适配不同存储数据库。
@@ -89,7 +89,7 @@ var Migrations = []Migration{
 }
 
 func RunMigrations(d StorageDriver) error {
-    ensureMetaTable(d)   // 创建 schema_migrations 版本记录表
+    ensureMetaTable(d)   // 创建 ldb_schema_migrations 版本记录表
     current := getCurrentVersion(d)
     for _, m := range Migrations {
         if m.Version > current {
@@ -108,7 +108,7 @@ func RunMigrations(d StorageDriver) error {
 ```go
 func createConnectionsTable(d StorageDriver, db *sql.DB) error {
     _, err := db.Exec(fmt.Sprintf(`
-        CREATE TABLE IF NOT EXISTS connections (
+        CREATE TABLE IF NOT EXISTS ldb_connections (
             id          TEXT PRIMARY KEY,
             name        TEXT NOT NULL,
             db_type     TEXT NOT NULL,
@@ -133,7 +133,7 @@ func createConnectionsTable(d StorageDriver, db *sql.DB) error {
 
 ```sql
 -- ① 数据库连接配置
-CREATE TABLE connections (
+CREATE TABLE ldb_connections (
     id          TEXT PRIMARY KEY,   -- UUID
     name        TEXT NOT NULL,
     db_type     TEXT NOT NULL,      -- mysql/postgres/oracle/mssql/sqlite/clickhouse/hive
@@ -148,7 +148,7 @@ CREATE TABLE connections (
 );
 
 -- ② 表 Schema 快照
-CREATE TABLE table_schemas (
+CREATE TABLE ldb_table_schemas (
     id              TEXT PRIMARY KEY,
     connection_id   TEXT NOT NULL,
     database_name   TEXT NOT NULL,
@@ -157,11 +157,11 @@ CREATE TABLE table_schemas (
     table_comment   TEXT,
     scan_version    INTEGER NOT NULL DEFAULT 1,   -- 每次扫描（全库或单表）+1，以表为粒度独立推进
     scanned_at      INTEGER NOT NULL,
-    FOREIGN KEY (connection_id) REFERENCES connections(id)
+    FOREIGN KEY (connection_id) REFERENCES ldb_connections(id)
 );
 
 -- ③ 字段 Schema 快照
-CREATE TABLE column_schemas (
+CREATE TABLE ldb_column_schemas (
     id              TEXT PRIMARY KEY,
     table_schema_id TEXT NOT NULL,
     column_name     TEXT NOT NULL,
@@ -177,24 +177,24 @@ CREATE TABLE column_schemas (
     fk_ref_table    TEXT,               -- 物理外键：引用的表
     fk_ref_column   TEXT,               -- 物理外键：引用的列
     extra           TEXT,               -- JSON: 额外信息（长度、精度、原始 extra 值等）
-    FOREIGN KEY (table_schema_id) REFERENCES table_schemas(id)
+    FOREIGN KEY (table_schema_id) REFERENCES ldb_table_schemas(id)
 );
 
 -- ④ 表级生成器配置
-CREATE TABLE table_gen_configs (
+CREATE TABLE ldb_table_gen_configs (
     id              TEXT PRIMARY KEY,
     table_schema_id TEXT NOT NULL UNIQUE,
     gen_count       INTEGER DEFAULT 100,
     truncate_before INTEGER DEFAULT 0,  -- bool
     order_index     INTEGER,            -- 生成顺序（处理外键依赖拓扑排序结果）
     is_enabled      INTEGER DEFAULT 1,
-    FOREIGN KEY (table_schema_id) REFERENCES table_schemas(id)
+    FOREIGN KEY (table_schema_id) REFERENCES ldb_table_schemas(id)
 );
 
 -- ⑤ 字段级生成器配置
 --    confirmed_at IS NULL  → 系统自动推断，待用户确认（UI 显示橙色 "待确认" 标签）
 --    confirmed_at NOT NULL → 用户已确认（含逻辑外键，由用户操作直接写入带时间戳）
-CREATE TABLE column_gen_configs (
+CREATE TABLE ldb_column_gen_configs (
     id                TEXT PRIMARY KEY,
     column_schema_id  TEXT NOT NULL UNIQUE,
     generator_type    TEXT NOT NULL,        -- 见§五 生成器类型枚举
@@ -203,11 +203,11 @@ CREATE TABLE column_gen_configs (
     logic_fk_table    TEXT,                 -- 逻辑外键：关联表（用户手动指定）
     logic_fk_column   TEXT,                 -- 逻辑外键：关联列（用户手动指定）
     confirmed_at      INTEGER,              -- NULL=待确认；非NULL=已确认时间戳
-    FOREIGN KEY (column_schema_id) REFERENCES column_schemas(id)
+    FOREIGN KEY (column_schema_id) REFERENCES ldb_column_schemas(id)
 );
 
--- ⑥ 表间关系及数量倍数（独立于 column_gen_configs，描述两表间生成数量约定）
-CREATE TABLE table_relations (
+-- ⑥ 表间关系及数量倍数（独立于 ldb_column_gen_configs，描述两表间生成数量约定）
+CREATE TABLE ldb_table_relations (
     id                  TEXT PRIMARY KEY,
     from_table_id       TEXT NOT NULL,      -- 主表（"一"侧）
     from_column_id      TEXT NOT NULL,      -- 主表关联列
@@ -217,14 +217,14 @@ CREATE TABLE table_relations (
     multiplier_min      INTEGER,            -- 仅 1:n 有效，倍数下限（如 1）
     multiplier_max      INTEGER,            -- 仅 1:n 有效，倍数上限（如 30）
     source              TEXT NOT NULL,      -- "physical_fk" | "logical"
-    FOREIGN KEY (from_table_id) REFERENCES table_schemas(id),
-    FOREIGN KEY (to_table_id)   REFERENCES table_schemas(id)
+    FOREIGN KEY (from_table_id) REFERENCES ldb_table_schemas(id),
+    FOREIGN KEY (to_table_id)   REFERENCES ldb_table_schemas(id)
 );
 
 -- ⑦ 扫描历史
 --    scan_scope = "full_db"      : 全库扫描，scope_target = NULL
 --    scan_scope = "single_table" : 单表扫描，scope_target = table_name
-CREATE TABLE scan_history (
+CREATE TABLE ldb_scan_history (
     id              TEXT PRIMARY KEY,
     connection_id   TEXT NOT NULL,
     database_name   TEXT NOT NULL,
@@ -232,13 +232,13 @@ CREATE TABLE scan_history (
     scan_scope      TEXT NOT NULL DEFAULT 'full_db',
     scope_target    TEXT,               -- 单表扫描时为 table_name
     scanned_at      INTEGER NOT NULL,
-    FOREIGN KEY (connection_id) REFERENCES connections(id)
+    FOREIGN KEY (connection_id) REFERENCES ldb_connections(id)
 );
 
 -- ⑧ 差异记录及确认状态
 --    confirmed_at IS NULL  → 用户尚未处理该差异（UI 展示）
 --    confirmed_at NOT NULL → 已确认，UI 不再展示
-CREATE TABLE scan_diffs (
+CREATE TABLE ldb_scan_diffs (
     id              TEXT PRIMARY KEY,
     scan_history_id TEXT NOT NULL,
     target_id       TEXT NOT NULL,      -- table_schema_id 或 column_schema_id
@@ -246,11 +246,11 @@ CREATE TABLE scan_diffs (
     diff_type       TEXT NOT NULL,      -- "added" | "removed" | "modified"
     diff_detail     TEXT,               -- JSON: 变化前后的具体属性快照
     confirmed_at    INTEGER,            -- NULL=未确认；非NULL=确认时间戳
-    FOREIGN KEY (scan_history_id) REFERENCES scan_history(id)
+    FOREIGN KEY (scan_history_id) REFERENCES ldb_scan_history(id)
 );
 
 -- ⑨ 持久化层版本管理（由 Migration 机制维护，不手动操作）
-CREATE TABLE schema_migrations (
+CREATE TABLE ldb_schema_migrations (
     version     INTEGER PRIMARY KEY,
     applied_at  INTEGER NOT NULL
 );
@@ -412,7 +412,7 @@ func DetectAutoIncrement(col RawColumn) bool {
 
 #### 扫描范围说明
 
-- **全库扫描**：遍历指定连接/库下所有表，更新全部 `table_schemas`/`column_schemas`，`scan_version` 统一 +1
+- **全库扫描**：遍历指定连接/库下所有表，更新全部 `ldb_table_schemas`/`ldb_column_schemas`，`scan_version` 统一 +1
 - **单表扫描**：只更新指定表，仅该表 `scan_version` +1，不影响同库其他表
 
 ```go
@@ -458,10 +458,10 @@ type AffectedGen struct {
 | 变化类型 | 对已有生成器的影响 |
 |---|---|
 | 新增字段 | 自动创建新生成器，`confirmed_at = NULL`（待确认） |
-| 删除字段 | 标记生成器 `is_enabled = 0`，`scan_diffs` 记录，待用户确认处理方式 |
+| 删除字段 | 标记生成器 `is_enabled = 0`，`ldb_scan_diffs` 记录，待用户确认处理方式 |
 | 类型变化 | 原生成器可能失效，`confirmed_at = NULL`（重置为待确认） |
 | 约束变化（nullable/unique）| 更新约束参数，`confirmed_at = NULL`（重置为待确认） |
-| 名称/注释变化 | 静默更新，不影响生成器，不写入 `scan_diffs` |
+| 名称/注释变化 | 静默更新，不影响生成器，不写入 `ldb_scan_diffs` |
 
 ---
 
@@ -672,7 +672,7 @@ func GetScanDiffs(scanHistoryID *C.char) *C.char
 
 //export ConfirmDiff
 func ConfirmDiff(diffID *C.char) *C.char
-// 确认单条 diff，写入 scan_diffs.confirmed_at = now
+// 确认单条 diff，写入 ldb_scan_diffs.confirmed_at = now
 
 //export ConfirmAllDiffs
 func ConfirmAllDiffs(scanHistoryID *C.char) *C.char
@@ -720,7 +720,7 @@ TableConfigScreen（右侧 Tab，双击表节点打开）
     ├── TableHeaderSection
     │       ├── 表名、注释
     │       ├── 生成数量、Truncate 选项
-    │       └── 关联关系（table_relations）
+    │       └── 关联关系（ldb_table_relations）
     └── ColumnListSection（字段列表）
             │  点击字段行
             ▼
@@ -760,9 +760,9 @@ ScanSchema(connId, dbName, tableName?) ──FFI──►
     ├── 1. 执行新一轮扫描，获取最新 Schema 快照
     ├── 2. DiffSchema(旧快照, 新快照)
     ├── 3. 按规则处理各 diff 类型（见§4.3 处理规则表）
-    ├── 4. 写入 scan_history（scan_scope + scope_target）
-    ├── 5. 写入 scan_diffs（confirmed_at = NULL）
-    ├── 6. 更新 table_schemas/column_schemas（scan_version +1）
+    ├── 4. 写入 ldb_scan_history（scan_scope + scope_target）
+    ├── 5. 写入 ldb_scan_diffs（confirmed_at = NULL）
+    ├── 6. 更新 ldb_table_schemas/ldb_column_schemas（scan_version +1）
     └── 7. 返回 ScanDiffResult
     │
     ▼
@@ -800,11 +800,11 @@ Flutter: 有未确认 diff？
 | 持久化后端 | 环境变量切换，Migration 动态建表 | 支持 SQLite/MySQL/Postgres，零硬编码 DDL |
 | Schema 版本化 | `scan_version` 以表为粒度独立推进 | 全库/单表扫描互不干扰 |
 | 生成器确认状态 | 单字段 `confirmed_at`（NULL=待确认） | 消除冗余 `is_auto_mapped` 字段，逻辑更清晰 |
-| 表间数量关系 | 独立 `table_relations` 表 | 与"值从哪来"的 column_gen_configs 职责分离 |
+| 表间数量关系 | 独立 `ldb_table_relations` 表 | 与"值从哪来"的 ldb_column_gen_configs 职责分离 |
 | 外键数量类型 | `1:1` / `1:0-1` / `1:n` + 倍数范围 | 覆盖业务中常见的三类数量约定 |
 | 自增字段处理 | 自动推断 `is_auto_increment`，`is_enabled=0` | 避免插入时与数据库序列冲突，直接确认无需用户操作 |
 | Fallback 生成器参数 | `generator_opts = "{}"` | 生成器内置默认值，升级时自动受益 |
-| Diff 确认持久化 | `scan_diffs.confirmed_at` | 确认后 UI 自动消除，历史可查 |
+| Diff 确认持久化 | `ldb_scan_diffs.confirmed_at` | 确认后 UI 自动消除，历史可查 |
 | FFI 传输格式 | JSON 序列化 | 与产品设计一致，牺牲少量性能换开发便利性 |
 | 密码存储 | AES-256 加密后存储 | 避免连接密码明文落盘 |
 ```
