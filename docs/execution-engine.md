@@ -917,6 +917,14 @@ registerProgressCallback((ptr) {
     {"batch": 6, "phase": "generating", "rows": 0, "status": "in_progress"}
   ],
   
+  "external_calls": {
+    "total": 3,
+    "success": 3,
+    "failed": 0,
+    "by_type": {"http": 2, "sql": 1},
+    "last_status_code": 200
+  },
+  
   "status": "in_progress",
   "error": null
 }
@@ -1237,6 +1245,7 @@ CREATE TABLE generation_runs (
     finished_at     INTEGER,                       -- NULL 表示运行中
     total_rows      INTEGER,                       -- 实际写入总行数
     elapsed_ms      INTEGER,
+    external_calls  TEXT,                          -- JSON: 外部调用聚合（脱敏 URL、状态码、计数）
     error_message   TEXT,                          -- 失败时的错误摘要
     user_cancelled  INTEGER DEFAULT 0,             -- 是否用户主动取消
     FOREIGN KEY (connection_id) REFERENCES connections(id)
@@ -1255,6 +1264,7 @@ CREATE TABLE generation_run_tables (
     started_at      INTEGER,
     finished_at     INTEGER,
     elapsed_ms      INTEGER,
+    external_calls  TEXT,                          -- JSON: 当前表的外部调用聚合（可为空）
     status          TEXT NOT NULL,                 -- "pending" | "generating" | "writing" | "completed" | "failed" | "skipped"
     error_message   TEXT,
     is_implicit     INTEGER DEFAULT 0,             -- 是否隐式补入
@@ -1270,12 +1280,47 @@ CREATE TABLE generation_run_logs (
     level           TEXT NOT NULL,                 -- "INFO" | "WARN" | "ERROR" | "DEBUG"
     table_name      TEXT,                          -- NULL 表示全局日志
     message         TEXT NOT NULL,
-    details         TEXT,                          -- JSON
+    details         TEXT,                          -- JSON（URL 不含 query，凭据字段脱敏）
     FOREIGN KEY (run_id) REFERENCES generation_runs(id)
 );
 ```
 
-### 6.3 历史查询与展示
+### 6.3 `external_calls` 聚合 JSON 结构（新增）
+
+```json
+{
+  "total": 4,
+  "success": 3,
+  "failed": 1,
+  "by_type": {
+    "http": 2,
+    "sql": 2,
+    "file": 0,
+    "llm": 0
+  },
+  "items": [
+    {
+      "type": "http",
+      "endpoint": "https://api.partner.local/dataset",
+      "status_code": 200,
+      "elapsed_ms": 122
+    },
+    {
+      "type": "sql",
+      "endpoint": "postgres://crm/sales_rep",
+      "status_code": 0,
+      "elapsed_ms": 98
+    }
+  ]
+}
+```
+
+约束：
+- `endpoint` 必须脱敏：HTTP 仅保留不含 query 的 URL；SQL 不记录用户名和密码。
+- `status_code` 仅对 HTTP 有意义；非 HTTP 可置 `0`。
+- 该字段用于运行历史与进度展示，不替代详细审计日志。
+
+### 6.4 历史查询与展示
 
 **UI 展示**：
 
@@ -1302,7 +1347,7 @@ CREATE TABLE generation_run_logs (
 └─────────────────────────────────────────────────────────────┘
 ```
 
-### 6.4 FFI 接口扩展
+### 6.5 FFI 接口扩展
 
 ```go
 // ffi/exports.go 新增

@@ -33,15 +33,16 @@ type Generator interface {
     Type() GeneratorType
 }
 ```
- 
+
 ### 1.2 设计决策理由
 
 
-| 决策                   | 理由                                         |
-| ------------------------ | ---------------------------------------------- |
-| `interface{}` 返回值   | 支持 5 种抽象类型，避免泛型复杂性            |
-| 单值 + 批量双接口      | 批量满足预览(10条)场景，此外都会使用单值接口 |
-| `context.Context` 参数 | 支持超时控制、取消操作、并发协调             |
+| 决策                   | 理由                       |
+| -------------------- | ------------------------ |
+| `interface{}` 返回值    | 支持 5 种抽象类型，避免泛型复杂性       |
+| 单值 + 批量双接口           | 批量满足预览(10条)场景，此外都会使用单值接口 |
+| `context.Context` 参数 | 支持超时控制、取消操作、并发协调         |
+
 
 ---
 
@@ -50,12 +51,13 @@ type Generator interface {
 ### 2.1 两种方式对比
 
 
-| 维度       | 函数式`Generate(config)` | 对象式`NewGenerator(config).Generate()` |
-| ------------ | -------------------------- | ----------------------------------------- |
-| 初始化开销 | 每次调用解析配置         | 一次解析，多次使用                      |
-| 状态管理   | 无状态                   | 有状态（如序列号）                      |
-| 并发安全   | 天然安全                 | 需要额外处理                            |
-| 适用场景   | 一次性调用、预览         | 批量生成、有状态生成器                  |
+| 维度    | 函数式`Generate(config)` | 对象式`NewGenerator(config).Generate()` |
+| ----- | --------------------- | ------------------------------------ |
+| 初始化开销 | 每次调用解析配置              | 一次解析，多次使用                            |
+| 状态管理  | 无状态                   | 有状态（如序列号）                            |
+| 并发安全  | 天然安全                  | 需要额外处理                               |
+| 适用场景  | 一次性调用、预览              | 批量生成、有状态生成器                          |
+
 
 ### 2.2 推荐方案：混合模式
 
@@ -178,6 +180,7 @@ type IntSequenceGenerator struct {
 ```
 
 说明:
+
 - 字符串生成器: 除姓名、城市外，地址、公司名等均为中国（未来将扩展至其它国家）
 - 非字符串生成器，可以通过 Formatter 变成字符串输出。字符串类型的字段（varchar/text 等），可以指定非字符串生成器，但必须要指定 Formatter
 - SQL计算表达式和Python计算表达式: 可以引用其它字段。表达式的计算在所有字段数据生成后才开始计算，如果一条语句中包含多个表达式生成器。则需要评估字段生成顺序
@@ -238,7 +241,132 @@ func FromJSON(data []byte) (*GeneratorConfig, error) {
 }
 ```
 
-### 5.3 扩展步骤
+### 5.3 ExternalFeed 配置 Schema（同步已决策基线）
+
+> 对齐 `docs/external-data-and-ai-research.md`：统一 5 类 feed，MVP 启用文件/HTTP/SQL，LLM 预留但默认关闭。
+
+```json
+{
+  "type": "external_feed",
+  "enabled": true,
+  "kind": "embedded_json|uploaded_json|uploaded_csv|http|sql|llm",
+  "mvp_enabled": true,
+  "row_limit": 10000,
+  "row_limit_env": "LOOMIDBX_EXTERNAL_ROW_LIMIT",
+  "on_overflow": "truncate_warn",
+  "failure_policy": "hard_fail",
+  "config": {
+    "auth": {},
+    "request": {},
+    "extract": {}
+  }
+}
+```
+
+#### 5.3.1 通用字段
+
+
+| 字段               | 含义    | 说明                                                                |
+| ---------------- | ----- | ----------------------------------------------------------------- |
+| `kind`           | 数据源类型 | `embedded_json`/`uploaded_json`/`uploaded_csv`/`http`/`sql`/`llm` |
+| `row_limit`      | 拉取上限  | 默认 10000，可由环境变量覆盖                                                 |
+| `on_overflow`    | 超限策略  | 固定 `truncate_warn`（截断并告警）                                         |
+| `failure_policy` | 失败策略  | 固定 `hard_fail`（整任务失败并回滚）                                          |
+
+
+#### 5.3.2 HTTP 类型
+
+```json
+{
+  "kind": "http",
+  "config": {
+    "request": {
+      "method": "GET|POST",
+      "url": "https://example.com/dataset",
+      "headers": {"X-API-Key": "${ENV:API_KEY}"},
+      "query": {"tenant": "demo"},
+      "timeout_ms": 10000
+    },
+    "auth": {
+      "type": "none|api_key|bearer|oauth2|basic|hmac|digest",
+      "in": "header|query",
+      "token_url": "https://example.com/oauth/token",
+      "token_body": {"grant_type": "client_credentials"}
+    },
+    "extract": {
+      "response_format": "json_array",
+      "field_path": "$.name"
+    }
+  }
+}
+```
+
+规则：
+
+- HTTP 返回必须可解析为 JSON 数组。
+- 通过 `extract.field_path` 提取单列值。
+- 任一元素提取结果为 `null`，或最终数组为空，判定失败。
+
+#### 5.3.3 SQL 类型
+
+```json
+{
+  "kind": "sql",
+  "config": {
+    "connection": {
+      "driver": "mysql|postgres|sqlite|sqlserver|oracle",
+      "dsn": "${ENV:SQL_DSN}",
+      "username": "${ENV:SQL_USER}",
+      "password": "${ENV:SQL_PASSWORD}"
+    },
+    "auth": {
+      "type": "password|dsn|env"
+    },
+    "request": {
+      "query": "SELECT id, name FROM sales_rep WHERE active = 1"
+    },
+    "extract": {
+      "target_column": "name"
+    }
+  }
+}
+```
+
+规则：
+
+- SQL 可返回单列或多列，但只保留 `target_column` 对应列。
+- `target_column` 不存在、值为 `null`、结果为空时判定失败。
+
+#### 5.3.4 JSON/CSV 文件类型
+
+```json
+{
+  "kind": "uploaded_csv",
+  "config": {
+    "request": {
+      "path": "E:/data/dict/city.csv",
+      "encoding": "utf-8"
+    },
+    "extract": {
+      "column_index": 1,
+      "column_name": "city_name"
+    }
+  }
+}
+```
+
+规则：
+
+- JSON 文件要求为 JSON 数组，通过 `field_path` 提取单列。
+- CSV 文件要求 UTF-8；支持 `column_index` 或 `column_name`（二者同时配置时优先 `column_name`）。
+
+#### 5.3.5 LLM 类型（非 MVP）
+
+- `kind=llm` 保留 schema 但默认不可在 MVP 启用。
+- 参数支持直接输入或环境变量引用：`api_key`、`model_name`、`base_url`。
+- 仅要求 OpenAI 协议兼容，不纳入当前性能承诺。
+
+### 5.4 扩展步骤
 
 1. 定义新的 `GeneratorType` 常量
 2. 定义具体配置结构体（如 `NewGeneratorConfig`）
@@ -323,17 +451,18 @@ backend/generator/
 ## 7. 实现优先级
 
 
-| 优先级  | 生成器                              | 理由                 |
-| ------ | ---------------------------------- | ------------------- |
-| P0     | interface.go, registry.go, base.go | 基础架构，必须先实现    |
-| P1     | int/sequence.go                    | 最常用，自增主键       |
-| P1     | string/regex.go                    | 灵活通用              |
-| P1     | common/enum.go                     | 枚举字段必备          |
-| P1     | common/foreign_key.go              | 外键约束核心功能       |
-| P2     | int/snowflake.go                   | 分布式ID需求          |
-| P2     | datetime/*.go                      | 时间字段常见          |
-| P2     | string/name.go, phone.go           | 逼真数据核心卖点       |
-| P3     | 其他生成器                           | 按需逐步实现          |
+| 优先级 | 生成器                                | 理由         |
+| --- | ---------------------------------- | ---------- |
+| P0  | interface.go, registry.go, base.go | 基础架构，必须先实现 |
+| P1  | int/sequence.go                    | 最常用，自增主键   |
+| P1  | string/regex.go                    | 灵活通用       |
+| P1  | common/enum.go                     | 枚举字段必备     |
+| P1  | common/foreign_key.go              | 外键约束核心功能   |
+| P2  | int/snowflake.go                   | 分布式ID需求    |
+| P2  | datetime/*.go                      | 时间字段常见     |
+| P2  | string/name.go, phone.go           | 逼真数据核心卖点   |
+| P3  | 其他生成器                              | 按需逐步实现     |
+
 
 ---
 
@@ -356,3 +485,4 @@ backend/generator/
 - 连接真实数据库，配置生成规则，生成并写入数据
 - 验证外键关系正确性
 - 验证唯一性约束
+
