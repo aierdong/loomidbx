@@ -4,10 +4,10 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"net"
-	"time"
 
 	"github.com/google/uuid"
+
+	"loomidbx/backend/connector"
 	"loomidbx/backend/storage"
 )
 
@@ -54,6 +54,7 @@ func NewConnectionServiceWithDeps(store *storage.ConnectionStore, purger Credent
 		store:            store,
 		credentialPurger: purger,
 		keyringAccessor:  keyring,
+		connectorManager: connector.NewDriverManager(),
 	}
 }
 
@@ -181,48 +182,103 @@ func (s *ConnectionService) credentialPurgeFunc() storage.DeleteCredentialRefere
 //
 // 输出：
 // - *AppError: 成功返回 nil，失败返回结构化错误。
+//
+// 错误分类：
+// - AUTH_FAILED: 认证失败（用户名/密码错误）
+// - TLS_ERROR: TLS/SSL 协商失败或证书问题
+// - PROTOCOL_ERROR: 数据库协议层错误
+// - UPSTREAM_UNAVAILABLE: 网络层不可达
+// - DEADLINE_EXCEEDED: 连接超时
 func (s *ConnectionService) TestConnection(ctx context.Context, req ConnectionRequest) *AppError {
+	// 参数校验
+	if req.DBType == "" {
+		return &AppError{Code: CodeInvalidArgument, Message: "db_type is required"}
+	}
+
+	// 解析凭据
 	resolvedSecret, appErr := s.resolveCredential(ctx, req)
 	if appErr != nil {
 		return appErr
 	}
 
-	timeoutSec := req.TimeoutSec
-	if timeoutSec <= 0 {
-		timeoutSec = 20
-	}
-	if timeoutSec > 300 {
-		timeoutSec = 300
+	// 构建连接参数
+	params := connector.ConnectParams{
+		DbType:     req.DBType,
+		Host:       req.Host,
+		Port:       req.Port,
+		Username:   req.Username,
+		Password:   resolvedSecret,
+		Database:   req.Database,
+		Extra:      req.Extra,
+		TimeoutSec: req.TimeoutSec,
 	}
 
-	if req.DBType == "sqlite" {
-		// sqlite 不需要网络探测，视为连接可达。
+	// 通过 connector 执行连接测试
+	result := s.connectorManager.PingWithTimeout(ctx, params)
+
+	// 成功时返回 nil
+	if result.Category == connector.CategoryNone {
 		return nil
 	}
-	if req.Host == "" || req.Port == 0 {
-		return &AppError{Code: CodeInvalidArgument, Message: "host and port are required for network db"}
+
+	// 根据错误分类映射错误码
+	return mapConnectResultToAppError(result, params.TimeoutSec, req.Password, resolvedSecret)
+}
+
+// mapConnectResultToAppError 将连接器结果映射为应用层错误。
+func mapConnectResultToAppError(result connector.ConnectResult, timeoutSec int, rawPassword, resolvedSecret string) *AppError {
+	timeout := timeoutSec
+	if timeout <= 0 {
+		timeout = 20
 	}
 
-	dialCtx, cancel := context.WithTimeout(ctx, time.Duration(timeoutSec)*time.Second)
-	defer cancel()
+	details := result.Details
+	if details == nil {
+		details = make(map[string]string)
+	}
 
-	addr := fmt.Sprintf("%s:%d", req.Host, req.Port)
-	var d net.Dialer
-	conn, err := d.DialContext(dialCtx, "tcp", addr)
-	if err != nil {
-		if dialCtx.Err() == context.DeadlineExceeded {
-			return &AppError{
-				Code:    CodeDeadlineExceeded,
-				Message: "connection test timeout",
-				Details: map[string]string{"timeout_sec": fmt.Sprintf("%d", timeoutSec)},
-			}
+	// 脱敏处理原始错误
+	if result.RawError != nil {
+		details["cause"] = sanitizeError(result.RawError, rawPassword, resolvedSecret)
+	}
+
+	switch result.Category {
+	case connector.CategoryAuth:
+		return &AppError{
+			Code:    CodeAuthFailed,
+			Message: "authentication failed",
+			Details: details,
 		}
+	case connector.CategoryTLS:
+		return &AppError{
+			Code:    CodeTLSError,
+			Message: "TLS/SSL error",
+			Details: details,
+		}
+	case connector.CategoryProtocol:
+		return &AppError{
+			Code:    CodeProtocolError,
+			Message: "protocol error",
+			Details: details,
+		}
+	case connector.CategoryTimeout:
+		details["timeout_sec"] = fmt.Sprintf("%d", timeout)
+		return &AppError{
+			Code:    CodeDeadlineExceeded,
+			Message: "connection test timeout",
+			Details: details,
+		}
+	case connector.CategoryNetwork:
+		return &AppError{
+			Code:    CodeUpstreamUnavailable,
+			Message: "network unreachable",
+			Details: details,
+		}
+	default:
 		return &AppError{
 			Code:    CodeUpstreamUnavailable,
 			Message: "connection test failed",
-			Details: map[string]string{"cause": sanitizeError(err, req.Password, resolvedSecret)},
+			Details: details,
 		}
 	}
-	_ = conn.Close()
-	return nil
 }

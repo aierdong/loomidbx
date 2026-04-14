@@ -37,9 +37,9 @@
 | flutter build windows                                                  | 通过  |
 
 本地可执行：`cd frontend` 后 `flutter run -d windows`（需本机 Flutter 在 PATH 或使用 D:\flutter\bin\flutter.bat）。
-DLL 联调时请将 backend/build/libldb.dll 放到与 loomidbx.exe 同目录或按 native_library.dart 调整加载路径。 
+DLL 联调时请将 backend/build/libldb.dll 放到与 loomidbx.exe 同目录或按 native_library.dart 调整加载路径。
 所有相关 to-do 已勾选完成。
-若你希望下一步把 CMake 里自动复制 libldb.dll 到 runner 输出目录，可以说一下我按 Windows 流程补上。 
+若你希望下一步把 CMake 里自动复制 libldb.dll 到 runner 输出目录，可以说一下我按 Windows 流程补上。
 
 
 # spec-01-connection-and-credentials 的 Quick Spec 执行计划
@@ -443,7 +443,52 @@ _ timeout_sec 生效（默认20s，支持覆盖）
 _ 超时返回 DEADLINE_EXCEEDED
 _ 认证/网络/TLS 错误有结构化分类
 
-（其余要求同通用模板）
+完成后必须按以下格式输出：
+_ 已完成任务在 tasks.md 中标记完成
+_ 已完成任务：<逐条列出任务号>
+_ 变更文件：<路径列表>
+_ 验证结果：<测试命令与结果摘要>
+_ 未解决问题/风险：<如无写“无”>
+_ 下一批前置条件：<满足/不满足 + 原因>
+
+---
+
+批次 D 完成报告
+
+  - 已完成任务在 tasks.md 中标记完成：已在 .kiro/specs/spec-01-connection-and-credentials/tasks.md 将 3.1、3.2 标记为 [x]
+  - 已完成任务：
+    - 3.1：按支持的数据库类型封装打开连接与 Ping 或等价可达性检测，并设置可配置短超时。实现了 MySQL、PostgreSQL、SQLite 三个连接器，统一通过
+    DriverManager.PingWithTimeout 执行连接测试。
+    - 3.2：将凭据解析结果注入连接器参数拼装流程，对 TLS 与协议级错误进行归类映射。实现了 classifyError
+    函数对驱动错误进行结构化分类（AUTH_FAILED、TLS_ERROR、PROTOCOL_ERROR、NETWORK_ERROR、TIMEOUT）。
+  - 变更文件：
+    - .kiro/specs/spec-01-connection-and-credentials/tasks.md
+    - backend/connector/connector.go（新增）
+    - backend/connector/mysql.go（新增）
+    - backend/connector/postgres.go（新增）
+    - backend/connector/sqlite.go（新增）
+    - backend/connector/connector_test.go（新增）
+    - backend/app/connection_types.go（修改：新增错误码 AUTH_FAILED/TLS_ERROR/PROTOCOL_ERROR，新增 ConnectorManager 接口）
+    - backend/app/connection_service.go（修改：集成 connector 包，重构 TestConnection 方法）
+    - backend/app/connection_service_connectivity_test.go（修改：新增连接测试错误分类测试）
+    - go.mod（修改：新增 mysql/pq 驱动依赖）
+    - go.sum（更新）
+  - 验证结果：
+    - 命令：go test ./backend/... -v
+    - 结果摘要：通过（ok loomidbx/backend/app，ok loomidbx/backend/connector）
+    - 关键覆盖点：
+        - TestConnection 为同步接口 ✓
+      - timeout_sec 生效（默认 20s，支持覆盖，测试验证 2s/3s 超时）✓
+      - 超时返回 DEADLINE_EXCEEDED 并携带 timeout_sec 详情 ✓
+      - 认证错误映射为 AUTH_FAILED ✓
+      - TLS 错误映射为 TLS_ERROR ✓
+      - 网络错误映射为 UPSTREAM_UNAVAILABLE ✓
+      - 协议错误（不支持的 db_type）映射为 PROTOCOL_ERROR ✓
+      - 错误详情不泄露明文密码 ✓
+  - 未解决问题/风险：
+    - 无
+  - 下一批前置条件：
+    - 满足：批次 D 3.1/3.2 已完成并通过自动化测试，connector 包已集成，错误分类机制稳定，可进入批次 E 任务实现。
 
 ------
 
@@ -456,7 +501,51 @@ _ 认证/网络/TLS 错误有结构化分类
 - FFI JSON 结构固定为 ok/data/error
 - Save/List 响应不返回明文密码或令牌
 - DeleteConnection 契约包含确认语义
-（其余要求同通用模板）
+完成后必须按以下格式输出：
+_ 已完成任务在 tasks.md 中标记完成
+_ 已完成任务：<逐条列出任务号>
+_ 变更文件：<路径列表>
+_ 验证结果：<测试命令与结果摘要>
+_ 未解决问题/风险：<如无写“无”>
+_ 下一批前置条件：<满足/不满足 + 原因>
+
+
+
+---
+  批次 E 完成报告                                                                                                                                                      
+                                                                                                                                                                       
+  _ 已完成任务在 tasks.md 中标记完成                                                                                                                                   
+                                                                                                                                                                       
+  _ 已完成任务：                                                                                                                                                       
+  - 4.1 实现聚合服务层，对「测试连接、列出连接、保存连接、删除连接」提供单一编排入口，并仅暴露 JSON 友好的载荷与错误外壳                                               
+  - 4.2 将内部类型适配为与权威文档一致的 JSON 请求与响应形状，保存与列表响应中永不包含明文密码或令牌                                                                   
+                                                                                                    
+
+  _ 变更文件：                                                                                                                                                         
+  - backend/ffi/json_adapter.go (新增) - FFI JSON 适配层实现                                                                                                           
+  - backend/ffi/json_adapter_test.go (新增) - FFI 契约测试                                                                                                             
+  - .kiro/specs/spec-01-connection-and-credentials/tasks.md (更新) - 任务状态标记                                                                                      
+                                                                                                                                                                       
+
+  _ 验证结果：                                                                                                                                                         
+  go test ./backend/ffi/... -v                                                                                                                                         
+  - TestFFIResponseStructure ✓ - 响应包含 ok/data/error 结构                                                                                                           
+  - TestSaveConnectionResponseNoPassword ✓ - 响应不含明文密码                                                                                                          
+  - TestListConnectionsResponseNoPassword ✓ - 列表响应不含密码字段                                                                                                     
+  - TestDeleteConnectionRequiresConfirmation ✓ - 删除需确认语义                                                                                                        
+  - TestDeleteConnectionWithConfirmation ✓ - 确认删除成功                                                                                                              
+  - TestConnectionFailureStructuredError ✓ - 错误有稳定错误码                                                                                                          
+  - TestErrorDetailsNoPasswordLeak ✓ - 错误详情不含明文密码                                                                                                            
+  - TestErrorCodesAreStable ✓ - 错误码为稳定大写蛇形命名                                                                                                               
+  - TestInvalidJSONReturnsInvalidArgument ✓ - JSON 解析失败返回 INVALID_ARGUMENT                                                                                       
+                                                                                                                                                                       
+
+  _ 未解决问题/风险：无                                                                                                                                                
+                                                                                                                                                                       
+  _ 下一批前置条件：满足                                                                                                                                               
+  - 任务 5.1、5.2、5.3 可继续执行                                                                                                                                      
+  - FFI 契约已固定为 {"ok": true/false, "data": {...}, "error": {...}} 结构                                                                                            
+  - 所有错误码已定义且稳定
 
 ------
 
@@ -469,8 +558,17 @@ _ 凭据优先级与脱敏测试齐全
 _ 连接测试集成用例覆盖成功/认证失败/超时
 _ FFI golden/契约快照固定
 _ 与 spec-02/06/07 的边界假验与对接说明完整
+完成后必须按以下格式输出：
+_ 已完成任务在 tasks.md 中标记完成
+_ 已完成任务：<逐条列出任务号>
+_ 变更文件：<路径列表>
+_ 验证结果：<测试命令与结果摘要>
+_ 未解决问题/风险：<如无写“无”>
+_ 下一批前置条件：<满足/不满足 + 原因> 
 
-（其余要求同通用模板）
+
+
+
 
 ------
 

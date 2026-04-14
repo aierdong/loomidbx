@@ -2,9 +2,14 @@ module loomidbx
 
 go 1.25.0
 
-require github.com/json-iterator/go v1.1.12
+require (
+	github.com/go-sql-driver/mysql v1.9.3
+	github.com/json-iterator/go v1.1.12
+	github.com/lib/pq v1.12.3
+)
 
 require (
+	filippo.io/edwards25519 v1.1.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/ncruces/go-strftime v1.0.0 // indirect

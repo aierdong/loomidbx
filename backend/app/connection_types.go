@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"loomidbx/backend/connector"
 	"loomidbx/backend/storage"
 )
 
@@ -24,6 +25,15 @@ const (
 
 	// CodeUpstreamUnavailable 表示目标数据库不可达或拒绝连接。
 	CodeUpstreamUnavailable = "UPSTREAM_UNAVAILABLE"
+
+	// CodeAuthFailed 表示认证失败（用户名/密码错误）。
+	CodeAuthFailed = "AUTH_FAILED"
+
+	// CodeTLSError 表示 TLS/SSL 协商失败或证书问题。
+	CodeTLSError = "TLS_ERROR"
+
+	// CodeProtocolError 表示数据库协议层错误（版本不兼容等）。
+	CodeProtocolError = "PROTOCOL_ERROR"
 
 	// CodeKeyringUnavailable 表示当前环境不支持或未启用密钥环。
 	CodeKeyringUnavailable = "KEYRING_UNAVAILABLE"
@@ -134,6 +144,18 @@ type ConnectionService struct {
 
 	// keyringAccessor 负责读取系统密钥环凭据。
 	keyringAccessor KeyringAccessor
+
+	// connectorManager 负责数据库连接测试。
+	connectorManager ConnectorManager
+}
+
+// ConnectorManager 定义数据库连接器管理接口。
+type ConnectorManager interface {
+	// PingWithTimeout 在指定超时内执行连接测试。
+	PingWithTimeout(ctx context.Context, params connector.ConnectParams) connector.ConnectResult
+
+	// SupportedTypes 返回已注册的数据库类型列表。
+	SupportedTypes() []string
 }
 
 // CredentialPurger 定义删除连接时的外部凭据清理契约。
