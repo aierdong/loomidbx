@@ -74,6 +74,21 @@ type ConnectionStore struct {
 	backend string
 }
 
+// CredentialReference 表示连接关联的凭据引用记录（例如密钥环 token）。
+type CredentialReference struct {
+	// ID 为凭据引用记录唯一标识。
+	ID string
+
+	// ConnectionID 为所属连接 ID。
+	ConnectionID string
+
+	// Provider 为凭据提供方标识（如 keyring/env）。
+	Provider string
+
+	// CredentialRef 为提供方内部引用标识。
+	CredentialRef string
+}
+
 // NewConnectionStore 创建基于 sqlite 的连接存储。
 //
 // 输入：
@@ -287,20 +302,39 @@ func (s *ConnectionStore) ListConnections(ctx context.Context) ([]ConnectionReco
 	return out, nil
 }
 
-// DeleteConnectionCascade 在同一事务中删除连接及其下游元数据。
+// DeleteCredentialReferenceFunc 定义删除流程中的外部凭据清理回调。
+type DeleteCredentialReferenceFunc func(ctx context.Context, ref CredentialReference) error
+
+// DeleteConnectionCascade 在同一事务中删除连接及其下游元数据，并先清理凭据引用。
 //
 // 输入：
 // - ctx: 请求上下文。
 // - id: 待删除连接 ID。
+// - purgeFn: 外部凭据清理回调（可为 nil）。
 //
 // 输出：
 // - error: 删除失败错误；不存在时返回 sql.ErrNoRows。
-func (s *ConnectionStore) DeleteConnectionCascade(ctx context.Context, id string) error {
+func (s *ConnectionStore) DeleteConnectionCascade(ctx context.Context, id string, purgeFn DeleteCredentialReferenceFunc) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("start delete tx: %w", err)
 	}
 	defer tx.Rollback()
+
+	refs, err := s.listCredentialReferencesTx(ctx, tx, id)
+	if err != nil {
+		return fmt.Errorf("load credential refs: %w", err)
+	}
+	for _, ref := range refs {
+		if purgeFn != nil {
+			if err := purgeFn(ctx, ref); err != nil {
+				return fmt.Errorf("purge credential reference %s: %w", ref.ID, err)
+			}
+		}
+	}
+	if _, err := tx.ExecContext(ctx, s.buildDeleteCredentialRefsByConnectionIDSQL(), id); err != nil {
+		return fmt.Errorf("delete credential refs: %w", err)
+	}
 
 	// 先删除依赖连接的元数据，避免孤儿记录。
 	if _, err := tx.ExecContext(ctx, s.buildDeleteTableSchemasByConnectionIDSQL(), id); err != nil {
@@ -353,6 +387,46 @@ func (s *ConnectionStore) CountTableSchemasByConnection(ctx context.Context, con
 	return count, nil
 }
 
+// InsertCredentialReference 为测试插入连接凭据引用记录。
+//
+// 输入：
+// - ctx: 请求上下文。
+// - ref: 待插入凭据引用记录。
+//
+// 输出：
+// - error: 插入失败错误。
+func (s *ConnectionStore) InsertCredentialReference(ctx context.Context, ref CredentialReference) error {
+	_, err := s.db.ExecContext(
+		ctx,
+		s.buildInsertCredentialReferenceSQL(),
+		ref.ID,
+		ref.ConnectionID,
+		ref.Provider,
+		ref.CredentialRef,
+		time.Now().Unix(),
+		time.Now().Unix(),
+	)
+	return err
+}
+
+// CountCredentialReferencesByConnection 统计指定连接凭据引用数量（测试辅助方法）。
+//
+// 输入：
+// - ctx: 请求上下文。
+// - connectionID: 连接 ID。
+//
+// 输出：
+// - int: 凭据引用数量。
+// - error: 统计失败错误。
+func (s *ConnectionStore) CountCredentialReferencesByConnection(ctx context.Context, connectionID string) (int, error) {
+	row := s.db.QueryRowContext(ctx, s.buildCountCredentialRefsByConnectionSQL(), connectionID)
+	var count int
+	if err := row.Scan(&count); err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
 // placeholder 返回指定参数位置的 SQL 占位符。
 //
 // 输入：
@@ -385,6 +459,11 @@ func (s *ConnectionStore) buildDeleteConnectionByIDSQL() string {
 	return fmt.Sprintf(`DELETE FROM ldb_connections WHERE id = %s`, s.placeholder(1))
 }
 
+// buildDeleteCredentialRefsByConnectionIDSQL 构建按 connection_id 删除凭据引用 SQL。
+func (s *ConnectionStore) buildDeleteCredentialRefsByConnectionIDSQL() string {
+	return fmt.Sprintf(`DELETE FROM ldb_connection_credentials WHERE connection_id = %s`, s.placeholder(1))
+}
+
 // buildInsertDummyTableSchemaSQL 构建测试辅助表快照插入 SQL。
 func (s *ConnectionStore) buildInsertDummyTableSchemaSQL() string {
 	return fmt.Sprintf(`
@@ -396,6 +475,19 @@ func (s *ConnectionStore) buildInsertDummyTableSchemaSQL() string {
 // buildCountTableSchemasByConnectionSQL 构建按 connection_id 统计表快照数量的 SQL。
 func (s *ConnectionStore) buildCountTableSchemasByConnectionSQL() string {
 	return fmt.Sprintf(`SELECT COUNT(1) FROM ldb_table_schemas WHERE connection_id = %s`, s.placeholder(1))
+}
+
+// buildInsertCredentialReferenceSQL 构建测试辅助凭据引用插入 SQL。
+func (s *ConnectionStore) buildInsertCredentialReferenceSQL() string {
+	return fmt.Sprintf(`
+		INSERT INTO ldb_connection_credentials (id, connection_id, provider, credential_ref, created_at, updated_at)
+		VALUES (%s, %s, %s, %s, %s, %s)
+	`, s.placeholder(1), s.placeholder(2), s.placeholder(3), s.placeholder(4), s.placeholder(5), s.placeholder(6))
+}
+
+// buildCountCredentialRefsByConnectionSQL 构建按 connection_id 统计凭据引用数量 SQL。
+func (s *ConnectionStore) buildCountCredentialRefsByConnectionSQL() string {
+	return fmt.Sprintf(`SELECT COUNT(1) FROM ldb_connection_credentials WHERE connection_id = %s`, s.placeholder(1))
 }
 
 // migrate 初始化本批所需的 ldb_ 元数据表结构。
@@ -446,7 +538,43 @@ func (s *ConnectionStore) buildMigrationStatements() []string {
 			FOREIGN KEY (connection_id) REFERENCES ldb_connections(id)
 		)`, types.IDType, types.IDType, types.NameType, types.NameType, types.NameType, 
 			types.CommentType, types.CounterType, types.TimestampType),
+		fmt.Sprintf(`CREATE TABLE IF NOT EXISTS ldb_connection_credentials (
+			id %s PRIMARY KEY,
+			connection_id %s NOT NULL,
+			provider %s NOT NULL,
+			credential_ref %s NOT NULL,
+			created_at %s NOT NULL,
+			updated_at %s NOT NULL,
+			FOREIGN KEY (connection_id) REFERENCES ldb_connections(id)
+		)`, types.IDType, types.IDType, types.NameType, types.NameType, types.TimestampType, types.TimestampType),
 	}
+}
+
+// listCredentialReferencesTx 在事务内读取指定连接的全部凭据引用。
+func (s *ConnectionStore) listCredentialReferencesTx(ctx context.Context, tx *sql.Tx, connectionID string) ([]CredentialReference, error) {
+	rows, err := tx.QueryContext(ctx, fmt.Sprintf(`
+		SELECT id, connection_id, provider, credential_ref
+		FROM ldb_connection_credentials
+		WHERE connection_id = %s
+		ORDER BY id
+	`, s.placeholder(1)), connectionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	refs := make([]CredentialReference, 0)
+	for rows.Next() {
+		var ref CredentialReference
+		if err := rows.Scan(&ref.ID, &ref.ConnectionID, &ref.Provider, &ref.CredentialRef); err != nil {
+			return nil, err
+		}
+		refs = append(refs, ref)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return refs, nil
 }
 
 // migrationTypes 描述 migration 阶段按后端映射的列类型集合。

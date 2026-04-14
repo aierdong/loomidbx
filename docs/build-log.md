@@ -262,8 +262,11 @@ flowchart LR
 3) 保持与 steering 一致：LDB_ 前缀、JSON FFI、ldb_ 表前缀、敏感信息脱敏。
 4) 修改后运行必要测试（至少覆盖本批关键路径）。
 5) 不要提交 git commit。
+6) 在tasks.md 中勾选已经完成的条目
 
 完成后必须按以下格式输出：
+
+- 在tasks.md 中勾选已经完成的条目
 
 \- 已完成任务：<逐条列出任务号>
 
@@ -364,7 +367,36 @@ flowchart LR
 
 \- 删除流程事务一致性
 
-（其余要求同通用模板）
+完成后必须按以下格式输出：
+- 已完成任务在 tasks.md 中标记完成
+- 已完成任务：<逐条列出任务号>
+- 变更文件：<路径列表>
+- 验证结果：<测试命令与结果摘要>
+- 未解决问题/风险：<如无写“无”>
+- 下一批前置条件：<满足/不满足 + 原因>
+
+
+
+---
+
+- 已完成任务：
+  - `1.2`（按最新 `design.md`）：未确认删除返回 `CONFIRMATION_REQUIRED`、确认后级联删除、清理密钥环/凭据引用、删除流程事务一致性。
+- 变更文件：
+  - `backend/app/connection_service.go`
+  - `backend/app/connection_service_test.go`
+  - `backend/storage/connection_store.go`
+- 验证结果：
+  - 命令：`go test ./backend/app ./backend/storage`
+  - 结果：通过（`ok loomidoubx/backend/app`，`ok loomidoubx/backend/storage`）
+  - 关键覆盖点摘要：
+    - 未确认删除时返回 `CONFIRMATION_REQUIRED`，且不触发凭据清理
+    - 确认后执行级联删除（连接 + 从属表快照 + 凭据引用）
+    - 删除时调用凭据清理回调，确保无悬挂凭据引用
+    - 凭据清理失败时整条删除事务回滚（连接/从属数据/凭据引用均保留）
+- 未解决问题/风险：
+  - 无
+- 下一批前置条件：
+  - 满足：`1.2` 的语义与事务一致性已由实现与自动化测试覆盖，可进入下一批次任务。
 
 ------
 

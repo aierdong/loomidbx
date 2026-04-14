@@ -8,8 +8,9 @@ import (
 	"net"
 	"time"
 
-	"github.com/google/uuid"
 	"loomidbx/backend/storage"
+
+	"github.com/google/uuid"
 )
 
 const (
@@ -123,6 +124,21 @@ type ConnectionSummary struct {
 type ConnectionService struct {
 	// store 负责 ldb_connections 等元数据表访问。
 	store *storage.ConnectionStore
+
+	// credentialPurger 负责删除阶段的凭据引用外部清理。
+	credentialPurger CredentialPurger
+}
+
+// CredentialPurger 定义连接删除时的凭据清理契约。
+type CredentialPurger interface {
+	// PurgeCredentialReference 清理一条凭据引用（如密钥环条目）。
+	PurgeCredentialReference(ctx context.Context, ref storage.CredentialReference) error
+}
+
+type noopCredentialPurger struct{}
+
+func (noopCredentialPurger) PurgeCredentialReference(context.Context, storage.CredentialReference) error {
+	return nil
 }
 
 // NewConnectionService 创建连接应用服务实例。
@@ -133,7 +149,18 @@ type ConnectionService struct {
 // 输出：
 // - *ConnectionService: 初始化后的服务实例。
 func NewConnectionService(store *storage.ConnectionStore) *ConnectionService {
-	return &ConnectionService{store: store}
+	return NewConnectionServiceWithPurger(store, nil)
+}
+
+// NewConnectionServiceWithPurger 创建带凭据清理器的连接应用服务实例。
+func NewConnectionServiceWithPurger(store *storage.ConnectionStore, purger CredentialPurger) *ConnectionService {
+	if purger == nil {
+		purger = noopCredentialPurger{}
+	}
+	return &ConnectionService{
+		store:            store,
+		credentialPurger: purger,
+	}
 }
 
 // SaveConnection 保存或更新连接记录。
@@ -227,13 +254,19 @@ func (s *ConnectionService) DeleteConnection(ctx context.Context, req DeleteConn
 	if !req.ConfirmCascade {
 		return &AppError{Code: CodeConfirmationRequired, Message: "delete requires confirm_cascade=true"}
 	}
-	if err := s.store.DeleteConnectionCascade(ctx, req.ID); err != nil {
+	if err := s.store.DeleteConnectionCascade(ctx, req.ID, s.credentialPurgeFunc()); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return &AppError{Code: CodeNotFound, Message: "connection not found"}
 		}
 		return &AppError{Code: CodeStorageError, Message: "delete connection failed"}
 	}
 	return nil
+}
+
+func (s *ConnectionService) credentialPurgeFunc() storage.DeleteCredentialReferenceFunc {
+	return func(ctx context.Context, ref storage.CredentialReference) error {
+		return s.credentialPurger.PurgeCredentialReference(ctx, ref)
+	}
 }
 
 // TestConnection 执行同步连接测试。
