@@ -62,10 +62,10 @@ func NewConnectionServiceWithDeps(store *storage.ConnectionStore, purger Credent
 //
 // 输入：
 // - ctx: 请求上下文。
-// - req: 连接请求；req.ID 为空表示创建，非空表示更新。
+// - req: 连接请求；req.ID 为空表示创建，非空时更新。
 //
 // 输出：
-// - string: 持久化后的连接 ID。
+// - string: 久化后的连接 ID。
 // - *AppError: 失败时返回结构化错误。
 func (s *ConnectionService) SaveConnection(ctx context.Context, req ConnectionRequest) (string, *AppError) {
 	if req.Name == "" || req.DBType == "" {
@@ -77,30 +77,43 @@ func (s *ConnectionService) SaveConnection(ctx context.Context, req ConnectionRe
 		id = uuid.NewString()
 	}
 
-	passwordToStore, appErr := s.passwordForStorage(ctx, req)
+	// 确保请求中包含 ID，用于构建 keyring 引用
+	reqWithID := req
+	reqWithID.ID = id
+
+	// 对于更新操作，获取旧记录以继承 credential_ref 等信息
+	var existing *storage.ConnectionRecord
+	if req.ID != "" {
+		existingRec, err := s.store.GetConnectionByID(ctx, req.ID)
+		if err != nil && err != sql.ErrNoRows {
+			return "", &AppError{Code: CodeStorageError, Message: "load existing connection failed"}
+		}
+		existing = existingRec
+	}
+
+	// 如果请求中没有 extra，使用旧记录的 extra（继承 credential_ref）
+	if reqWithID.Extra == "" && existing != nil && existing.Extra != "" {
+		reqWithID.Extra = existing.Extra
+	}
+
+	passwordToStore, updatedExtra, appErr := s.passwordForStorage(ctx, reqWithID)
 	if appErr != nil {
 		return "", appErr
 	}
 
 	rec := storage.ConnectionRecord{
 		ID:       id,
-		Name:     req.Name,
-		DBType:   req.DBType,
-		Host:     req.Host,
-		Port:     req.Port,
-		Username: req.Username,
+		Name:     reqWithID.Name,
+		DBType:   reqWithID.DBType,
+		Host:     reqWithID.Host,
+		Port:     reqWithID.Port,
+		Username: reqWithID.Username,
 		Password: passwordToStore,
-		Database: req.Database,
-		Extra:    req.Extra,
+		Database: reqWithID.Database,
+		Extra:    updatedExtra,
 	}
-	if req.ID != "" {
-		existing, err := s.store.GetConnectionByID(ctx, req.ID)
-		if err != nil && err != sql.ErrNoRows {
-			return "", &AppError{Code: CodeStorageError, Message: "load existing connection failed"}
-		}
-		if existing != nil {
-			rec.CreatedAt = existing.CreatedAt
-		}
+	if existing != nil {
+		rec.CreatedAt = existing.CreatedAt
 	}
 
 	if err := s.store.UpsertConnection(ctx, rec); err != nil {

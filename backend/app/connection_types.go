@@ -172,13 +172,16 @@ func (noopCredentialPurger) PurgeCredentialReference(context.Context, storage.Cr
 	return nil
 }
 
-// KeyringAccessor 定义密钥环可用性探测与凭据读取能力。
+// KeyringAccessor 定义密钥环可用性探测与凭据读写能力。
 type KeyringAccessor interface {
 	// IsAvailable 检查当前运行环境是否可访问密钥环。
 	IsAvailable(ctx context.Context) error
 
 	// Get 按引用从密钥环读取凭据明文（仅在内存中使用）。
 	Get(ctx context.Context, ref string) (string, error)
+
+	// Set 将凭据存入密钥环，返回引用标识用于后续持久化。
+	Set(ctx context.Context, ref string, secret string) error
 }
 
 // noopKeyringAccessor 用于未注入密钥环实现时的默认拒绝。
@@ -190,6 +193,11 @@ func (noopKeyringAccessor) IsAvailable(context.Context) error { return ErrKeyrin
 // Get 在默认实现中返回密钥环不可用。
 func (noopKeyringAccessor) Get(context.Context, string) (string, error) {
 	return "", ErrKeyringUnavailable
+}
+
+// Set 在默认实现中返回密钥环不可用。
+func (noopKeyringAccessor) Set(context.Context, string, string) error {
+	return ErrKeyringUnavailable
 }
 
 var (

@@ -43,8 +43,10 @@ func (m *mockCredentialPurger) PurgeCredentialReference(_ context.Context, ref s
 type mockKeyringAccessor struct {
 	availableErr error
 	getErr       error
+	setErr       error
 	secrets      map[string]string
 	getCalls     int
+	setCalls     int
 }
 
 func (m *mockKeyringAccessor) IsAvailable(context.Context) error {
@@ -57,6 +59,18 @@ func (m *mockKeyringAccessor) Get(_ context.Context, ref string) (string, error)
 		return "", m.getErr
 	}
 	return m.secrets[ref], nil
+}
+
+func (m *mockKeyringAccessor) Set(_ context.Context, ref string, secret string) error {
+	m.setCalls++
+	if m.setErr != nil {
+		return m.setErr
+	}
+	if m.secrets == nil {
+		m.secrets = make(map[string]string)
+	}
+	m.secrets[ref] = secret
+	return nil
 }
 
 func appEncryptForTest(t *testing.T, plain string) string {
