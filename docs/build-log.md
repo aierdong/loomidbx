@@ -240,8 +240,6 @@ flowchart LR
 - 未解决风险/阻塞
 - 下一批前置条件是否满足（是/否+原因）
 
-
-
 ---
 
 ## 通用主模板（每批都用）
@@ -252,13 +250,9 @@ flowchart LR
 
 1) 只实现本批次任务，不扩展范围。
 2) 必须遵循最新 design.md 冻结决策（尤其是：
-
-   \- 删除策略：警示用户 -> 用户确认 -> 级联删除
-
-   \- TestConnection：同步接口 + timeout_sec（默认20s，可配置）
-
-   \- 密钥环最小平台支持矩阵与错误语义）
-
+    _ 删除策略：警示用户 -> 用户确认 -> 级联删除
+    _ TestConnection：同步接口 + timeout_sec（默认20s，可配置）
+    _ 密钥环最小平台支持矩阵与错误语义）
 3) 保持与 steering 一致：LDB_ 前缀、JSON FFI、ldb_ 表前缀、敏感信息脱敏。
 4) 修改后运行必要测试（至少覆盖本批关键路径）。
 5) 不要提交 git commit。
@@ -267,16 +261,11 @@ flowchart LR
 完成后必须按以下格式输出：
 
 - 在tasks.md 中勾选已经完成的条目
-
-\- 已完成任务：<逐条列出任务号>
-
-\- 变更文件：<路径列表>
-
-\- 验证结果：<测试命令与结果摘要>
-
-\- 未解决问题/风险：<如无写“无”>
-
-\- 下一批前置条件：<满足/不满足 + 原因>
+_ 已完成任务：<逐条列出任务号>
+_ 变更文件：<路径列表>
+_ 验证结果：<测试命令与结果摘要>
+_ 未解决问题/风险：<如无写“无”>
+_ 下一批前置条件：<满足/不满足 + 原因>
 
 ------
 
@@ -331,8 +320,6 @@ flowchart LR
     backend/app
     ```
 
-     
-
     测试通过，覆盖以下关键路径：
 
     - 创建 + 编辑连接时 ID 不变
@@ -358,14 +345,10 @@ flowchart LR
 注意：以最新 design.md 为准，覆盖 tasks.md 中旧表述。
 
 必须实现：
-
-\- 删除前确认语义（未确认返回 CONFIRMATION_REQUIRED）
-
-\- 确认后执行级联删除
-
-\- 清理密钥环/凭据引用，确保无悬挂
-
-\- 删除流程事务一致性
+_ 删除前确认语义（未确认返回 CONFIRMATION_REQUIRED）
+_ 确认后执行级联删除
+_ 清理密钥环/凭据引用，确保无悬挂
+_ 删除流程事务一致性
 
 完成后必须按以下格式输出：
 - 已完成任务在 tasks.md 中标记完成
@@ -374,8 +357,6 @@ flowchart LR
 - 验证结果：<测试命令与结果摘要>
 - 未解决问题/风险：<如无写“无”>
 - 下一批前置条件：<满足/不满足 + 原因>
-
-
 
 ---
 
@@ -405,18 +386,50 @@ flowchart LR
 你现在执行 spec-01 的实现批次 C，任务范围仅限：2.1, 2.2, 2.3。
 
 重点验收：
+_ env/keyring/AES 完整优先级链可测试
+_ keyring 不可用 -> KEYRING_UNAVAILABLE
+_ keyring 拒绝访问 -> KEYRING_ACCESS_DENIED
+_ 禁止静默明文落库
+_ 日志与错误输出不泄露敏感值
 
-\- env/keyring/AES 完整优先级链可测试
+完成后必须按以下格式输出：
+_ 已完成任务在 tasks.md 中标记完成
+_ 已完成任务：<逐条列出任务号>
+_ 变更文件：<路径列表>
+_ 验证结果：<测试命令与结果摘要>
+_ 未解决问题/风险：<如无写“无”>
+_ 下一批前置条件：<满足/不满足 + 原因>
 
-\- keyring 不可用 -> KEYRING_UNAVAILABLE
+---
 
-\- keyring 拒绝访问 -> KEYRING_ACCESS_DENIED
+- 已完成任务在 tasks.md 中标记完成
+  - 已在 `.kiro/specs/spec-01-connection-and-credentials/tasks.md` 将 `2.1`、`2.2`、`2.3` 标记为 `[x]`
+- 已完成任务：
+  - `2.1`：实现环境变量占位解析（`env:VAR_NAME`），并在变量缺失时返回可分类错误
+  - `2.2`：实现 `env > keyring > AES` 固定优先级解析链，并覆盖冲突路径测试
+  - `2.3`：实现密钥环降级错误码映射（`KEYRING_UNAVAILABLE` / `KEYRING_ACCESS_DENIED`），并禁止静默明文落库（保存时自动 AES 加密或拒绝）
+- 变更文件：
+  - `.kiro/specs/spec-01-connection-and-credentials/tasks.md`
+  - `backend/app/connection_service.go`
+  - `backend/app/connection_service_test.go`
+  - `backend/app/connection_service_internal_test.go`
+- 验证结果：
+  - `go test ./backend/app`：通过（新增优先级链、keyring 错误码、明文落库禁止、脱敏断言相关测试）
+  - `go test ./backend/...`：通过
+  - 结果摘要：
+    - `env` 覆盖 `keyring/AES` 优先级行为可测
+    - keyring 不可用返回 `KEYRING_UNAVAILABLE`
+    - keyring 拒绝访问返回 `KEYRING_ACCESS_DENIED`
+    - 保存连接不会将明文密码写入 `ldb_connections.password`（写入 `aesgcm:` 前缀密文）
+    - 错误脱敏逻辑测试通过，敏感值不会出现在错误文本中
+- 未解决问题/风险：
+  - 当前 AES 主密钥默认可从 `LOOMIDBX_AES_MASTER_KEY` 读取；若未配置会使用内置开发默认值，生产环境建议强制配置以满足更严格安全基线
+- 下一批前置条件：
+  - 满足 + `2.1/2.2/2.3` 已完成并通过自动化测试，可进入下一批任务实现
 
-\- 禁止静默明文落库
+---
 
-\- 日志与错误输出不泄露敏感值
-
-（其余要求同通用模板）
+当前 backend\app\connection_service.go 包含的逻辑太多，请拆分文件以增加代码的可读性和可维护性
 
 ------
 
@@ -425,14 +438,10 @@ flowchart LR
 你现在执行 spec-01 的实现批次 D，任务范围仅限：3.1, 3.2。
 
 重点验收：
-
-\- TestConnection 为同步接口
-
-\- timeout_sec 生效（默认20s，支持覆盖）
-
-\- 超时返回 DEADLINE_EXCEEDED
-
-\- 认证/网络/TLS 错误有结构化分类
+_ TestConnection 为同步接口
+_ timeout_sec 生效（默认20s，支持覆盖）
+_ 超时返回 DEADLINE_EXCEEDED
+_ 认证/网络/TLS 错误有结构化分类
 
 （其余要求同通用模板）
 
@@ -443,15 +452,10 @@ flowchart LR
 你现在执行 spec-01 的实现批次 E，任务范围仅限：4.1, 4.2。
 
 重点验收：
-
-\- 服务层聚合入口稳定（测试、保存、列表、删除）
-
-\- FFI JSON 结构固定为 ok/data/error
-
-\- Save/List 响应不返回明文密码或令牌
-
-\- DeleteConnection 契约包含确认语义
-
+- 服务层聚合入口稳定（测试、保存、列表、删除）
+- FFI JSON 结构固定为 ok/data/error
+- Save/List 响应不返回明文密码或令牌
+- DeleteConnection 契约包含确认语义
 （其余要求同通用模板）
 
 ------
@@ -461,14 +465,10 @@ flowchart LR
 你现在执行 spec-01 的实现批次 F，任务范围仅限：5.1, 5.2, 5.3, 6.1, 6.2, 6.3。
 
 重点验收：
-
-\- 凭据优先级与脱敏测试齐全
-
-\- 连接测试集成用例覆盖成功/认证失败/超时
-
-\- FFI golden/契约快照固定
-
-\- 与 spec-02/06/07 的边界假验与对接说明完整
+_ 凭据优先级与脱敏测试齐全
+_ 连接测试集成用例覆盖成功/认证失败/超时
+_ FFI golden/契约快照固定
+_ 与 spec-02/06/07 的边界假验与对接说明完整
 
 （其余要求同通用模板）
 

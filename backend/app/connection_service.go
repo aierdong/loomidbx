@@ -3,183 +3,84 @@ package app
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"fmt"
 	"net"
 	"time"
 
-	"loomidbx/backend/storage"
-
 	"github.com/google/uuid"
+	"loomidbx/backend/storage"
 )
-
-const (
-	// CodeInvalidArgument 表示输入参数不满足最小约束。
-	CodeInvalidArgument      = "INVALID_ARGUMENT"
-
-	// CodeStorageError 表示元数据存储读写失败。
-	CodeStorageError         = "STORAGE_ERROR"
-
-	// CodeNotFound 表示请求的连接记录不存在。
-	CodeNotFound             = "NOT_FOUND"
-
-	// CodeConfirmationRequired 表示删除等危险操作缺少确认标记。
-	CodeConfirmationRequired = "CONFIRMATION_REQUIRED"
-
-	// CodeDeadlineExceeded 表示连接测试超时。
-	CodeDeadlineExceeded     = "DEADLINE_EXCEEDED"
-
-	// CodeUpstreamUnavailable 表示目标数据库不可达或拒绝连接。
-	CodeUpstreamUnavailable  = "UPSTREAM_UNAVAILABLE"
-
-	// CodeKeyringUnavailable 表示当前平台或环境无法使用密钥环。
-	CodeKeyringUnavailable   = "KEYRING_UNAVAILABLE"
-
-	// CodeKeyringAccessDenied 表示密钥环可用但访问被拒绝。
-	CodeKeyringAccessDenied  = "KEYRING_ACCESS_DENIED"
-)
-
-// AppError 是应用层统一错误模型，供 FFI 直接序列化返回。
-type AppError struct {
-	// Code 是稳定错误码，用于前端分支与契约映射。
-	Code    string            `json:"code"`
-
-	// Message 是面向调用方的可读错误描述。
-	Message string            `json:"message"`
-
-	// Details 是可选附加信息，禁止包含敏感明文数据。
-	Details map[string]string `json:"details,omitempty"`
-}
-
-// ConnectionRequest 描述连接保存/测试请求。
-type ConnectionRequest struct {
-	// ID 为连接唯一标识；为空时表示创建，非空时表示更新。
-	ID         string `json:"id,omitempty"`
-
-	// Name 为连接展示名称。
-	Name       string `json:"name"`
-
-	// DBType 为数据库类型，如 mysql/postgres/sqlite。
-	DBType     string `json:"db_type"`
-
-	// Host 为数据库主机地址。
-	Host       string `json:"host,omitempty"`
-
-	// Port 为数据库端口。
-	Port       int    `json:"port,omitempty"`
-
-	// Username 为连接用户名。
-	Username   string `json:"username,omitempty"`
-
-	// Password 为敏感凭据，当前实现仅在内存中透传。
-	Password   string `json:"password,omitempty"`
-
-	// Database 为目标数据库名。
-	Database   string `json:"database,omitempty"`
-
-	// Extra 为扩展 JSON 字符串（如 sslmode 等）。
-	Extra      string `json:"extra,omitempty"`
-
-	// TimeoutSec 为连接测试超时时间（秒），<=0 使用默认值 20。
-	TimeoutSec int    `json:"timeout_sec,omitempty"`
-}
-
-// DeleteConnectionRequest 描述删除连接请求。
-type DeleteConnectionRequest struct {
-	// ID 为待删除连接 ID。
-	ID             string `json:"id"`
-
-	// ConfirmCascade 为级联删除确认标记，必须显式为 true。
-	ConfirmCascade bool   `json:"confirm_cascade"`
-}
-
-// ConnectionSummary 是列表接口返回的非敏感连接摘要。
-type ConnectionSummary struct {
-	// ID 为连接唯一标识。
-	ID       string `json:"id"`
-
-	// Name 为连接展示名称。
-	Name     string `json:"name"`
-
-	// DBType 为数据库类型。
-	DBType   string `json:"db_type"`
-
-	// Host 为数据库主机地址。
-	Host     string `json:"host,omitempty"`
-
-	// Port 为数据库端口。
-	Port     int    `json:"port,omitempty"`
-
-	// Username 为连接用户名。
-	Username string `json:"username,omitempty"`
-
-	// Database 为目标数据库名。
-	Database string `json:"database,omitempty"`
-	
-	// Extra 为扩展配置，不包含明文凭据。
-	Extra    string `json:"extra,omitempty"`
-}
-
-// ConnectionService 编排连接 CRUD 与连接测试能力。
-type ConnectionService struct {
-	// store 负责 ldb_connections 等元数据表访问。
-	store *storage.ConnectionStore
-
-	// credentialPurger 负责删除阶段的凭据引用外部清理。
-	credentialPurger CredentialPurger
-}
-
-// CredentialPurger 定义连接删除时的凭据清理契约。
-type CredentialPurger interface {
-	// PurgeCredentialReference 清理一条凭据引用（如密钥环条目）。
-	PurgeCredentialReference(ctx context.Context, ref storage.CredentialReference) error
-}
-
-type noopCredentialPurger struct{}
-
-func (noopCredentialPurger) PurgeCredentialReference(context.Context, storage.CredentialReference) error {
-	return nil
-}
 
 // NewConnectionService 创建连接应用服务实例。
 //
 // 输入：
-// - store: 元数据存储访问对象。
+// - store: 连接元数据存储实现。
 //
 // 输出：
-// - *ConnectionService: 初始化后的服务实例。
+// - *ConnectionService: 初始化后的服务对象。
 func NewConnectionService(store *storage.ConnectionStore) *ConnectionService {
-	return NewConnectionServiceWithPurger(store, nil)
+	return NewConnectionServiceWithDeps(store, nil, nil)
 }
 
 // NewConnectionServiceWithPurger 创建带凭据清理器的连接应用服务实例。
+//
+// 输入：
+// - store: 连接元数据存储实现。
+// - purger: 外部凭据清理器（可为 nil）。
+//
+// 输出：
+// - *ConnectionService: 初始化后的服务对象。
 func NewConnectionServiceWithPurger(store *storage.ConnectionStore, purger CredentialPurger) *ConnectionService {
+	return NewConnectionServiceWithDeps(store, purger, nil)
+}
+
+// NewConnectionServiceWithDeps 创建带凭据清理器与密钥环访问器的连接应用服务实例。
+//
+// 输入：
+// - store: 连接元数据存储实现。
+// - purger: 外部凭据清理器（可为 nil）。
+// - keyring: 密钥环读取器（可为 nil）。
+//
+// 输出：
+// - *ConnectionService: 初始化后的服务对象。
+func NewConnectionServiceWithDeps(store *storage.ConnectionStore, purger CredentialPurger, keyring KeyringAccessor) *ConnectionService {
 	if purger == nil {
 		purger = noopCredentialPurger{}
+	}
+	if keyring == nil {
+		keyring = noopKeyringAccessor{}
 	}
 	return &ConnectionService{
 		store:            store,
 		credentialPurger: purger,
+		keyringAccessor:  keyring,
 	}
 }
 
 // SaveConnection 保存或更新连接记录。
 //
 // 输入：
-// - ctx: 请求上下文，用于取消和超时传播。
-// - req: 连接请求；req.ID 为空时创建，非空时按 ID 更新。
+// - ctx: 请求上下文。
+// - req: 连接请求；req.ID 为空表示创建，非空表示更新。
 //
 // 输出：
-// - string: 保存成功后的连接 ID（更新时保持不变）。
-// - *AppError: 失败时返回结构化错误；成功为 nil。
+// - string: 持久化后的连接 ID。
+// - *AppError: 失败时返回结构化错误。
 func (s *ConnectionService) SaveConnection(ctx context.Context, req ConnectionRequest) (string, *AppError) {
 	if req.Name == "" || req.DBType == "" {
 		return "", &AppError{Code: CodeInvalidArgument, Message: "name and db_type are required"}
 	}
+
 	id := req.ID
 	if id == "" {
 		id = uuid.NewString()
 	}
+
+	passwordToStore, appErr := s.passwordForStorage(ctx, req)
+	if appErr != nil {
+		return "", appErr
+	}
+
 	rec := storage.ConnectionRecord{
 		ID:       id,
 		Name:     req.Name,
@@ -187,19 +88,20 @@ func (s *ConnectionService) SaveConnection(ctx context.Context, req ConnectionRe
 		Host:     req.Host,
 		Port:     req.Port,
 		Username: req.Username,
-		Password: req.Password,
+		Password: passwordToStore,
 		Database: req.Database,
 		Extra:    req.Extra,
 	}
 	if req.ID != "" {
 		existing, err := s.store.GetConnectionByID(ctx, req.ID)
-		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		if err != nil && err != sql.ErrNoRows {
 			return "", &AppError{Code: CodeStorageError, Message: "load existing connection failed"}
 		}
 		if existing != nil {
 			rec.CreatedAt = existing.CreatedAt
 		}
 	}
+
 	if err := s.store.UpsertConnection(ctx, rec); err != nil {
 		return "", &AppError{
 			Code:    CodeStorageError,
@@ -216,13 +118,14 @@ func (s *ConnectionService) SaveConnection(ctx context.Context, req ConnectionRe
 // - ctx: 请求上下文。
 //
 // 输出：
-// - []ConnectionSummary: 连接摘要数组。
-// - *AppError: 失败时返回结构化错误；成功为 nil。
+// - []ConnectionSummary: 连接摘要集合。
+// - *AppError: 失败时返回结构化错误。
 func (s *ConnectionService) ListConnections(ctx context.Context) ([]ConnectionSummary, *AppError) {
 	recs, err := s.store.ListConnections(ctx)
 	if err != nil {
 		return nil, &AppError{Code: CodeStorageError, Message: "list connections failed"}
 	}
+
 	out := make([]ConnectionSummary, 0, len(recs))
 	for _, rec := range recs {
 		out = append(out, ConnectionSummary{
@@ -243,10 +146,10 @@ func (s *ConnectionService) ListConnections(ctx context.Context) ([]ConnectionSu
 //
 // 输入：
 // - ctx: 请求上下文。
-// - req: 删除请求，必须携带 ConfirmCascade=true。
+// - req: 删除请求，需显式携带 ConfirmCascade=true。
 //
 // 输出：
-// - *AppError: 失败时返回结构化错误；成功为 nil。
+// - *AppError: 失败时返回结构化错误。
 func (s *ConnectionService) DeleteConnection(ctx context.Context, req DeleteConnectionRequest) *AppError {
 	if req.ID == "" {
 		return &AppError{Code: CodeInvalidArgument, Message: "id is required"}
@@ -255,7 +158,7 @@ func (s *ConnectionService) DeleteConnection(ctx context.Context, req DeleteConn
 		return &AppError{Code: CodeConfirmationRequired, Message: "delete requires confirm_cascade=true"}
 	}
 	if err := s.store.DeleteConnectionCascade(ctx, req.ID, s.credentialPurgeFunc()); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
+		if err == sql.ErrNoRows {
 			return &AppError{Code: CodeNotFound, Message: "connection not found"}
 		}
 		return &AppError{Code: CodeStorageError, Message: "delete connection failed"}
@@ -263,6 +166,7 @@ func (s *ConnectionService) DeleteConnection(ctx context.Context, req DeleteConn
 	return nil
 }
 
+// credentialPurgeFunc 将应用层清理接口适配为存储层回调签名。
 func (s *ConnectionService) credentialPurgeFunc() storage.DeleteCredentialReferenceFunc {
 	return func(ctx context.Context, ref storage.CredentialReference) error {
 		return s.credentialPurger.PurgeCredentialReference(ctx, ref)
@@ -273,11 +177,16 @@ func (s *ConnectionService) credentialPurgeFunc() storage.DeleteCredentialRefere
 //
 // 输入：
 // - ctx: 请求上下文。
-// - req: 连接测试请求，TimeoutSec 默认 20 秒，可配置。
+// - req: 连接测试请求，包含连接参数与超时设置。
 //
 // 输出：
-// - *AppError: 测试失败时返回结构化错误；成功为 nil。
+// - *AppError: 成功返回 nil，失败返回结构化错误。
 func (s *ConnectionService) TestConnection(ctx context.Context, req ConnectionRequest) *AppError {
+	resolvedSecret, appErr := s.resolveCredential(ctx, req)
+	if appErr != nil {
+		return appErr
+	}
+
 	timeoutSec := req.TimeoutSec
 	if timeoutSec <= 0 {
 		timeoutSec = 20
@@ -287,7 +196,7 @@ func (s *ConnectionService) TestConnection(ctx context.Context, req ConnectionRe
 	}
 
 	if req.DBType == "sqlite" {
-		// sqlite 无网络连接场景，按成功处理。
+		// sqlite 不需要网络探测，视为连接可达。
 		return nil
 	}
 	if req.Host == "" || req.Port == 0 {
@@ -301,7 +210,7 @@ func (s *ConnectionService) TestConnection(ctx context.Context, req ConnectionRe
 	var d net.Dialer
 	conn, err := d.DialContext(dialCtx, "tcp", addr)
 	if err != nil {
-		if errors.Is(dialCtx.Err(), context.DeadlineExceeded) {
+		if dialCtx.Err() == context.DeadlineExceeded {
 			return &AppError{
 				Code:    CodeDeadlineExceeded,
 				Message: "connection test timeout",
@@ -311,24 +220,9 @@ func (s *ConnectionService) TestConnection(ctx context.Context, req ConnectionRe
 		return &AppError{
 			Code:    CodeUpstreamUnavailable,
 			Message: "connection test failed",
-			Details: map[string]string{"cause": sanitizeError(err)},
+			Details: map[string]string{"cause": sanitizeError(err, req.Password, resolvedSecret)},
 		}
 	}
 	_ = conn.Close()
 	return nil
-}
-
-// sanitizeError 对错误消息做长度截断，避免泄漏过多底层细节。
-//
-// 主要参数：
-// - err: 原始错误对象。
-func sanitizeError(err error) string {
-	if err == nil {
-		return ""
-	}
-	msg := err.Error()
-	if len(msg) > 160 {
-		return msg[:160]
-	}
-	return msg
 }

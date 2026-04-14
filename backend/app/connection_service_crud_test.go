@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"path/filepath"
 	"testing"
 
 	"loomidbx/backend/app"
@@ -12,7 +11,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-// TestSaveAndEditKeepsID 验证更新连接时 ID 不发生变化。
+// 更新连接时应保持连接 ID 不变。
 func TestSaveAndEditKeepsID(t *testing.T) {
 	svc, _ := newService(t)
 	ctx := context.Background()
@@ -37,11 +36,12 @@ func TestSaveAndEditKeepsID(t *testing.T) {
 	}
 }
 
-// TestDeleteRequiresConfirmationAndCascades 验证删除前确认与级联删除语义。
+// 删除必须显式确认，并在确认后执行级联与凭据清理。
 func TestDeleteRequiresConfirmationAndCascades(t *testing.T) {
 	purger := &mockCredentialPurger{}
 	svc, store := newServiceWithPurger(t, purger)
 	ctx := context.Background()
+
 	id, errObj := svc.SaveConnection(ctx, app.ConnectionRequest{Name: "x", DBType: "sqlite"})
 	if errObj != nil {
 		t.Fatalf("save failed: %+v", errObj)
@@ -106,7 +106,7 @@ func TestDeleteRequiresConfirmationAndCascades(t *testing.T) {
 	}
 }
 
-// TestDeleteRollbackWhenCredentialPurgeFails 验证凭据清理失败时删除事务回滚。
+// 凭据清理失败时，删除事务应整体回滚。
 func TestDeleteRollbackWhenCredentialPurgeFails(t *testing.T) {
 	purger := &mockCredentialPurger{err: errors.New("keyring unavailable")}
 	svc, store := newServiceWithPurger(t, purger)
@@ -153,9 +153,9 @@ func TestDeleteRollbackWhenCredentialPurgeFails(t *testing.T) {
 	}
 }
 
-// TestStorageFailureDoesNotReportSuccess 验证持久化失败时不会误报成功。
+// 存储层失败时不能误报保存成功。
 func TestStorageFailureDoesNotReportSuccess(t *testing.T) {
-	tmp := filepath.Join(t.TempDir(), "meta.db")
+	tmp := t.TempDir() + "/meta.db"
 	db, err := sql.Open("sqlite", tmp)
 	if err != nil {
 		t.Fatalf("open db failed: %v", err)
@@ -174,55 +174,4 @@ func TestStorageFailureDoesNotReportSuccess(t *testing.T) {
 	if errObj == nil || errObj.Code != app.CodeStorageError {
 		t.Fatalf("expected storage error, got %+v", errObj)
 	}
-}
-
-// TestConnectionDefaultTimeoutAndNoFalseSuccess 验证连接测试失败路径返回错误而非成功。
-func TestConnectionDefaultTimeoutAndNoFalseSuccess(t *testing.T) {
-	svc, _ := newService(t)
-	errObj := svc.TestConnection(context.Background(), app.ConnectionRequest{
-		DBType: "postgres",
-		Host:   "127.0.0.1",
-		Port:   1,
-	})
-	if errObj == nil {
-		t.Fatal("expect failure for unreachable endpoint")
-	}
-	if errObj.Code != app.CodeUpstreamUnavailable {
-		t.Fatalf("unexpected code: %+v", errObj)
-	}
-}
-
-// newService 创建测试专用服务实例与临时元数据库。
-//
-// 输入：
-// - t: 测试上下文。
-//
-// 输出：
-// - *app.ConnectionService: 业务服务实例。
-// - *storage.ConnectionStore: 底层存储实例（用于测试辅助断言）。
-func newService(t *testing.T) (*app.ConnectionService, *storage.ConnectionStore) {
-	return newServiceWithPurger(t, nil)
-}
-
-func newServiceWithPurger(t *testing.T, purger app.CredentialPurger) (*app.ConnectionService, *storage.ConnectionStore) {
-	t.Helper()
-	tmp := filepath.Join(t.TempDir(), "meta.db")
-	store, err := storage.NewConnectionStore(tmp)
-	if err != nil {
-		t.Fatalf("new store failed: %v", err)
-	}
-	t.Cleanup(func() {
-		_ = store.Close()
-	})
-	return app.NewConnectionServiceWithPurger(store, purger), store
-}
-
-type mockCredentialPurger struct {
-	purged []storage.CredentialReference
-	err    error
-}
-
-func (m *mockCredentialPurger) PurgeCredentialReference(_ context.Context, ref storage.CredentialReference) error {
-	m.purged = append(m.purged, ref)
-	return m.err
 }
