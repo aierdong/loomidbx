@@ -63,6 +63,8 @@ flowchart TB
   Drv --> TDB
 ```
 
+
+
 **边界**：
 
 - **ConnectionApplicationService**：唯一编排「读配置 → 解析凭据 → 建连或测试 → 返回统一错误模型」的入口，供 FFI 调用。
@@ -73,13 +75,28 @@ flowchart TB
 
 ### Technology Stack
 
-| Layer | Choice / Version | Role in Feature | Notes |
-|-------|------------------|-----------------|-------|
-| Frontend | Flutter 3.x, Riverpod | 连接表单、调用 FFI | 耗时调用进 Isolate（steering） |
-| FFI | CGo buildmode c-shared, JSON | `TestConnection` / `SaveConnection` 等 | 与 `docs/schema.md` §六 对齐 |
-| Backend | Go 1.26+, database/sql | 建连、连接池短期使用用于测试 | Phase1 驱动：MySQL、Postgres、SQLite |
-| Meta storage | SQLite 默认或 StorageDriver | `ldb_connections` 持久化 | `LOOMIDBX_STORAGE` 切换 |
-| Security | OS keychain 抽象层 + encrypt at rest | 密钥环或 AES 列 | 实现阶段按 OS 分包 |
+
+| Layer        | Choice / Version                  | Role in Feature                       | Notes                           |
+| ------------ | --------------------------------- | ------------------------------------- | ------------------------------- |
+| Frontend     | Flutter 3.x, Riverpod             | 连接表单、调用 FFI                           | 耗时调用进 Isolate（steering）         |
+| FFI          | CGo buildmode c-shared, JSON      | `TestConnection` / `SaveConnection` 等 | 与 `docs/schema.md` §六 对齐        |
+| Backend      | Go 1.26+, database/sql            | 建连、连接池短期使用用于测试                        | Phase1 驱动：MySQL、Postgres、SQLite |
+| Meta storage | SQLite 默认或 StorageDriver          | `ldb_connections` 持久化                 | `LOOMIDBX_STORAGE` 切换           |
+| Security     | OS keychain 抽象层 + encrypt at rest | 密钥环或 AES 列                            | 实现阶段按 OS 分包                     |
+
+
+### Minimum Platform Support Matrix（密钥环）
+
+
+| Platform    | Keyring Backend (Minimum)      | Availability Probe               | If Unavailable                         | If Access Denied                   |
+| ----------- | ------------------------------ | -------------------------------- | -------------------------------------- | ---------------------------------- |
+| Windows 10+ | Credential Manager / DPAPI 适配层 | 启动时与保存前双重探测 `IsKeyringAvailable` | 返回 `KEYRING_UNAVAILABLE`，允许改为环境变量或拒绝保存 | 返回 `KEYRING_ACCESS_DENIED`，不回退明文存储 |
+| macOS 12+   | Keychain Services 适配层          | 启动时与保存前双重探测 `IsKeyringAvailable` | 返回 `KEYRING_UNAVAILABLE`，允许改为环境变量或拒绝保存 | 返回 `KEYRING_ACCESS_DENIED`，不回退明文存储 |
+| Linux (XDG) | Secret Service/libsecret 适配层   | 启动时与保存前双重探测 `IsKeyringAvailable` | 返回 `KEYRING_UNAVAILABLE`，允许改为环境变量或拒绝保存 | 返回 `KEYRING_ACCESS_DENIED`，不回退明文存储 |
+
+
+- 平台不在最小矩阵内时，统一视为 `KEYRING_UNAVAILABLE`。
+- 所有失败路径均不得静默写入明文凭据到 `ldb_connections` 或其他非安全存储。
 
 ## System Flows
 
@@ -105,50 +122,59 @@ sequenceDiagram
   FFI-->>UI: Result
 ```
 
+
+
 ### 保存连接
 
 - 校验字段 → 若策略为密钥环：写入密钥环并仅在 `ldb_connections` 存引用 → 若策略为列加密：走既有 AES-256 路径 → 提交事务 → 返回连接 ID。
 
 ## Requirements Traceability
 
-| Requirement | Summary | Components | Interfaces | Flows |
-|-------------|---------|------------|------------|-------|
-| 1.1 | 持久化连接字段与 ldb 前缀 | Store, Migration | `SaveConnection` | 保存流 |
-| 1.2 | 稳定连接 ID | Store | `ldb_connections.id` | 保存流 |
-| 1.3 | 删除与凭据清理 | AppSvc, Cred | `DeleteConnection` | 删除流 |
-| 1.4 | 持久化失败错误 | AppSvc, Store | FFI error | 保存流 |
-| 2.1 | 连接测试成功路径 | AppSvc, CF | `TestConnection` | 连接测试序列 |
-| 2.2 | 测试失败归类 | AppSvc | 结构化 error code | 连接测试序列 |
-| 2.3 | 测试进行中语义 | AppSvc | 超时上下文 | 连接测试序列 |
-| 3.1–3.3 | 密钥环与安全降级 | Cred, optional KeyringAdapter | `CredentialResolver` | 解析阶段 |
-| 4.1–4.3 | 环境变量优先级与脱敏 | Cred | 命名规则文档 + 单测 | 解析阶段 |
-| 5.1–5.3 | 范围控制与下游衔接 | 全部边界声明 | design 与 spec-06 对齐 | N/A |
+
+| Requirement | Summary          | Components                    | Interfaces            | Flows  |
+| ----------- | ---------------- | ----------------------------- | --------------------- | ------ |
+| 1.1         | 持久化连接字段与 ldb 前缀  | Store, Migration              | `SaveConnection`      | 保存流    |
+| 1.2         | 稳定连接 ID          | Store                         | `ldb_connections.id`  | 保存流    |
+| 1.3         | 删除与凭据清理（警示确认后级联） | AppSvc, Cred, Store           | `DeleteConnection`    | 删除流    |
+| 1.4         | 持久化失败错误          | AppSvc, Store                 | FFI error             | 保存流    |
+| 2.1         | 连接测试成功路径         | AppSvc, CF                    | `TestConnection`      | 连接测试序列 |
+| 2.2         | 测试失败归类           | AppSvc                        | 结构化 error code        | 连接测试序列 |
+| 2.3         | 同步测试语义 + 可配置超时   | AppSvc                        | `timeout_sec` + 超时错误码 | 连接测试序列 |
+| 3.1–3.3     | 密钥环与安全降级         | Cred, optional KeyringAdapter | `CredentialResolver`  | 解析阶段   |
+| 4.1–4.3     | 环境变量优先级与脱敏       | Cred                          | 命名规则文档 + 单测           | 解析阶段   |
+| 5.1–5.3     | 范围控制与下游衔接        | 全部边界声明                        | design 与 spec-06 对齐   | N/A    |
+
 
 ## Components and Interfaces
 
 ### Summary
 
-| Component | Domain | Intent | Req Coverage | Key Dependencies | Contracts |
-|-----------|--------|--------|--------------|------------------|-----------|
-| ConnectionApplicationService | Go 后端 | 编排测试与 CRUD | 1.x, 2.x | CredentialResolver, MetaStorage, ConnectorFactory | Service |
-| CredentialResolver | Go 后端 | 环境变量、密钥环、列加密协调 | 3.x, 4.x | OS adapters, Store | Service |
-| MetaStorage | Go storage | `ldb_connections` 访问 | 1.x | StorageDriver | Service |
-| ConnectorFactory | Go connector | 按 `db_type` 建连 | 2.x | database/sql drivers | Service |
-| FFI JSON Adapters | Go ffi | 请求解析与错误封装 | 5.x | ConnectionApplicationService | API |
+
+| Component                    | Domain       | Intent               | Req Coverage | Key Dependencies                                  | Contracts |
+| ---------------------------- | ------------ | -------------------- | ------------ | ------------------------------------------------- | --------- |
+| ConnectionApplicationService | Go 后端        | 编排测试与 CRUD           | 1.x, 2.x     | CredentialResolver, MetaStorage, ConnectorFactory | Service   |
+| CredentialResolver           | Go 后端        | 环境变量、密钥环、列加密协调       | 3.x, 4.x     | OS adapters, Store                                | Service   |
+| MetaStorage                  | Go storage   | `ldb_connections` 访问 | 1.x          | StorageDriver                                     | Service   |
+| ConnectorFactory             | Go connector | 按 `db_type` 建连       | 2.x          | database/sql drivers                              | Service   |
+| FFI JSON Adapters            | Go ffi       | 请求解析与错误封装            | 5.x          | ConnectionApplicationService                      | API       |
+
 
 ### Backend Layer
 
 #### ConnectionApplicationService
 
-| Field | Detail |
-|-------|--------|
-| Intent | 对外暴露连接测试、列表、保存、删除的统一用例级 API（供 FFI 调用） |
-| Requirements | 1.1–1.4, 2.1–2.3, 5.1–5.3 |
+
+| Field        | Detail                                |
+| ------------ | ------------------------------------- |
+| Intent       | 对外暴露连接测试、列表、保存、删除的统一用例级 API（供 FFI 调用） |
+| Requirements | 1.1–1.4, 2.1–2.3, 5.1–5.3             |
+
 
 **Responsibilities & Constraints**
 
 - 不调用 `ScanSchema` 与写入器；仅 `Ping`/`Connect` 级别验证。
 - 删除连接时必须调用 `CredentialResolver.Purge` 清除密钥环侧残余（若存在）。
+- 删除连接采用固定策略：UI 警示用户并确认后，后端执行级联删除（连接及其关联元数据），并在同一事务边界内完成凭据清理与级联落库。
 
 **Dependencies**
 
@@ -177,10 +203,12 @@ type ConnectionApplicationService interface {
 
 #### CredentialResolver
 
-| Field | Detail |
-|-------|--------|
-| Intent | 将「存储策略 + 原始记录 + OS 环境」解析为连接器可用参数 |
-| Requirements | 3.1–3.3, 4.1–4.3 |
+
+| Field        | Detail                           |
+| ------------ | -------------------------------- |
+| Intent       | 将「存储策略 + 原始记录 + OS 环境」解析为连接器可用参数 |
+| Requirements | 3.1–3.3, 4.1–4.3                 |
+
 
 **Contracts**: Service
 
@@ -193,10 +221,12 @@ type ConnectionApplicationService interface {
 
 #### MetaStorage
 
-| Field | Detail |
-|-------|--------|
-| Intent | `ldb_connections` 的 typed 访问与事务 |
-| Requirements | 1.1–1.4 |
+
+| Field        | Detail                          |
+| ------------ | ------------------------------- |
+| Intent       | `ldb_connections` 的 typed 访问与事务 |
+| Requirements | 1.1–1.4                         |
+
 
 **Physical Data Model 要点**
 
@@ -205,26 +235,31 @@ type ConnectionApplicationService interface {
 
 #### FFI JSON Adapters
 
-| Field | Detail |
-|-------|--------|
-| Intent | 将 JSON 映射到服务类型并返回 `{"ok","data","error"}` |
-| Requirements | 5.2–5.3 |
+
+| Field        | Detail                                    |
+| ------------ | ----------------------------------------- |
+| Intent       | 将 JSON 映射到服务类型并返回 `{"ok","data","error"}` |
+| Requirements | 5.2–5.3                                   |
+
 
 **API Contract（与 steering 对齐，字段级细节以 `docs/schema.md` 为准）**
 
-| Method | Request 要点 | Response | Errors |
-|--------|----------------|----------|--------|
-| TestConnection | `db_type`, host, port, database, username, extra | `{ "status": "ok" }` 或延迟字段 | 认证失败、超时、TLS |
-| SaveConnection | `name`, 连接四元组, `extra`, 凭据策略 | `{ "id": "..." }` | 校验错误、存储错误 |
-| ListConnections | 无或筛选 | 连接列表（密码永不返回） | 存储错误 |
-| DeleteConnection | `id` | `{ "status": "ok" }` | 未找到、外键约束若已存在下游表 |
+
+| Method           | Request 要点                                                      | Response                   | Errors                           |
+| ---------------- | --------------------------------------------------------------- | -------------------------- | -------------------------------- |
+| TestConnection   | `db_type`, host, port, database, username, extra, `timeout_sec` | `{ "status": "ok" }`（同步返回） | 认证失败、超时(`DEADLINE_EXCEEDED`)、TLS |
+| SaveConnection   | `name`, 连接四元组, `extra`, 凭据策略, `timeout_sec`                     | `{ "id": "..." }`          | 校验错误、存储错误                        |
+| ListConnections  | 无或筛选                                                            | 连接列表（密码永不返回）               | 存储错误                             |
+| DeleteConnection | `id`, `confirm_cascade=true`                                    | `{ "status": "ok" }`       | 未找到、`CONFIRMATION_REQUIRED`、存储错误 |
+
 
 ## Data Models
 
 ### Logical Data Model
 
 - **Connection 聚合根**：以 `ldb_connections.id` 为标识；`extra` 扩展字段承载 SSL、charset、`credential_mode`（列加密 | 密钥环引用 | 仅环境变量）等。
-- **不变量**：删除连接时，若下游 `ldb_table_schemas` 等已存在引用，行为以 **实现阶段** 从下列策略二选一并写清：阻止删除并提示先删从属数据，或级联删除（需与产品确认）；**spec-01 推荐先实现「阻止删除」以降低数据破坏半径**。
+- **不变量**：删除连接采用“警示用户 -> 用户确认 -> 后端级联删除”固定策略；未携带 `confirm_cascade=true` 时返回 `CONFIRMATION_REQUIRED`，不得执行删除。
+- **连接超时配置**：连接配置新增 `timeout_sec`（默认 20，允许用户指定），用于 `TestConnection` 与后续建连超时边界统一。
 
 ### Data Contracts & Integration
 
@@ -237,6 +272,7 @@ type ConnectionApplicationService interface {
 
 - **用户错误**：参数缺失、格式非法 → HTTP 风格可映射为 `INVALID_ARGUMENT` 等价码。
 - **外因错误**：网络、TLS、认证失败 → `UPSTREAM_UNAVAILABLE` / `AUTH_FAILED`。
+- **超时错误**：同步 `TestConnection` 超时返回 `DEADLINE_EXCEEDED`，并在 `details` 标明生效超时秒数（不含敏感信息）。
 - **内部错误**：存储失败、解密失败 → `INTERNAL` 或 `STORAGE_ERROR`。
 
 ### Monitoring
@@ -257,11 +293,12 @@ type ConnectionApplicationService interface {
 
 ## Performance & Scalability
 
-- 连接测试应使用短超时（建议可配置，默认 5–15s 档），避免阻塞 UI Isolate。
+- 连接测试采用同步接口，默认超时 20s；允许用户在连接配置中覆盖 `timeout_sec`，避免阻塞 UI Isolate。
 - 不建议在 spec-01 长期缓存目标库连接池至全局；以「测试时短连接」为主，完整池化留给后续高频写入 spec。
 
 ## Supporting References
 
-- 权威 DDL 与 FFI 清单：[`docs/schema.md`](../../../docs/schema.md)
-- steering 摘要：[`.kiro/steering/database-schema.md`](../../steering/database-schema.md)
-- 调研笔记：[`research.md`](./research.md)
+- 权威 DDL 与 FFI 清单：`[docs/schema.md](../../../docs/schema.md)`
+- steering 摘要：`[.kiro/steering/database-schema.md](../../steering/database-schema.md)`
+- 调研笔记：`[research.md](./research.md)`
+

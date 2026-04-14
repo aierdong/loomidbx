@@ -25,8 +25,11 @@
 
 ## Design Decisions
 
-| 决策 | 选择 | 说明 |
-|------|------|------|
-| 元数据表 | 延续 `ldb_connections` | 与 Migration 版本线一致 |
-| 列加密 | 保留 AES-256 列语义 | 与 steering 一致；密钥环模式可替代或并存于 `extra` |
-| FFI | JSON `ok/data/error` | 与 database-schema steering §8 一致 |
+
+| 决策   | 选择                   | 说明                                 |
+| ---- | -------------------- | ---------------------------------- |
+| 元数据表 | 延续 `ldb_connections` | 与 Migration 版本线一致                  |
+| 列加密  | 保留 AES-256 列语义       | 与 steering 一致；密钥环模式可替代或并存于 `extra` |
+| FFI  | JSON `ok/data/error` | 与 database-schema steering §8 一致   |
+
+

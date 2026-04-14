@@ -63,3 +63,4 @@
 1. The LoomiDBX 连接与凭据子系统 shall 不在本子系统内实现 Schema 扫描、结构 Diff、生成器配置或批量写入执行逻辑；这些能力分别由 spec-02、spec-03、spec-04 提供。
 2. Where 后续模块需要数据库访问, the LoomiDBX 连接与凭据子系统 shall 仅提供「已建立连接或可归组为连接器所需参数」的契约边界，而不承诺扫描或写入语义（下游在各自 spec 中定义）。
 3. The LoomiDBX 连接与凭据子系统 shall 在交付物中可验证地满足与下游 spec-02、spec-06、spec-07 的衔接前提：稳定连接建立、凭据安全策略明确、错误模型可被 FFI 契约消费（细节在 spec-01 设计与 spec-06 对齐）。
+
