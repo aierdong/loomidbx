@@ -149,6 +149,8 @@ flowchart LR
   spec08 --> spec11[spec11LLMFeedPostMVP]
 ```
 
+
+
 ---
 
 ## 5. 实施批次建议（按冻结依赖执行）
@@ -170,7 +172,7 @@ flowchart LR
 
 ## 7. 落地动作清单（下一步）
 
-1. 在 `.kiro/specs/` 下按本文件的 11 个命名初始化目录。  
-2. 先完成 Batch A 的 `requirements.md`，通过后进入 `design.md`。  
-3. 每个 spec 的 `tasks.md` 必须包含测试任务与跨 spec 联调任务。  
+1. 在 `.kiro/specs/` 下按本文件的 11 个命名初始化目录。
+2. 先完成 Batch A 的 `requirements.md`，通过后进入 `design.md`。
+3. 每个 spec 的 `tasks.md` 必须包含测试任务与跨 spec 联调任务。
 

@@ -1,0 +1,22 @@
+{
+  "feature_name": "spec-01-connection-and-credentials",
+  "created_at": "2026-04-14T03:51:06Z",
+  "updated_at": "2026-04-14T04:20:00Z",
+  "language": "zh",
+  "phase": "tasks-generated",
+  "approvals": {
+    "requirements": {
+      "generated": true,
+      "approved": true
+    },
+    "design": {
+      "generated": true,
+      "approved": true
+    },
+    "tasks": {
+      "generated": true,
+      "approved": true
+    }
+  },
+  "ready_for_implementation": true
+}
