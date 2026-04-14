@@ -1,3 +1,22 @@
 # IDE / OS
 .DS_Store
 .vscode/
+
+# Go — c-shared 与测试产物
+/backend/build/
+*.test
+*.out
+
+# Flutter / Dart
+**/build/
+**/.dart_tool/
+**/.flutter-plugins
+**/.flutter-plugins-dependencies
+**/*.iml
+**/Flutter/ephemeral/
+
+# 若本地生成到仓库根的旧产物
+/libldb.dll
+/libldb.h
+/libldb.so
+/libldb.dylib

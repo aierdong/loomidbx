@@ -101,8 +101,8 @@ import (
 
 // 项目内部
 import (
-    "loomidbx/backend/connector"
-    "loomidbx/backend/schema"
+    "loomidbx/connector"
+    "loomidbx/schema"
 )
 ```
 
