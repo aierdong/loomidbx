@@ -465,19 +465,19 @@ backend/generator/
 ## 7. 实现优先级
 
 
-| 优先级 | 生成器                                | 理由         |
-| --- | ---------------------------------- | ---------- |
-| P0  | interface.go, registry.go, base.go | 基础架构，必须先实现 |
-| P1  | int/sequence.go                    | 最常用，自增主键   |
-| P1  | string/regex.go                    | 灵活通用       |
-| P1  | common/enum.go                     | 枚举字段必备     |
-| P1  | common/foreign_key.go              | 外键约束核心功能   |
-| P2  | int/snowflake.go                   | 分布式ID需求    |
-| P2  | datetime/*.go                      | 时间字段常见     |
-| P2  | string/name.go, phone.go           | 逼真数据核心卖点   |
-| P3  | 其他生成器                              | 按需逐步实现     |
-| P4  | common/python_expression.go         | 非 MVP，后续阶段引入 |
-| P4  | common/ai.go                        | 非 MVP，后续阶段引入 |
+| 优先级 | 生成器                                | 理由           |
+| --- | ---------------------------------- | ------------ |
+| P0  | interface.go, registry.go, base.go | 基础架构，必须先实现   |
+| P1  | int/sequence.go                    | 最常用，自增主键     |
+| P1  | string/regex.go                    | 灵活通用         |
+| P1  | common/enum.go                     | 枚举字段必备       |
+| P1  | common/foreign_key.go              | 外键约束核心功能     |
+| P2  | int/snowflake.go                   | 分布式ID需求      |
+| P2  | datetime/*.go                      | 时间字段常见       |
+| P2  | string/name.go, phone.go           | 逼真数据核心卖点     |
+| P3  | 其他生成器                              | 按需逐步实现       |
+| P4  | common/python_expression.go        | 非 MVP，后续阶段引入 |
+| P4  | common/ai.go                       | 非 MVP，后续阶段引入 |
 
 
 ---

@@ -258,11 +258,13 @@ CREATE TABLE ldb_schema_migrations (
 
 ### 3.2 三种关系类型的生成数量语义
 
-| relation_type | 语义 | 生成数量规则 |
-|---|---|---|
-| `1:1` | 每条父记录恰好对应一条子记录 | `count(子表) = count(父表)` |
-| `1:0-1` | 每条父记录对应零或一条子记录 | `count(子表) ≤ count(父表)`，按概率决定是否生成 |
-| `1:n` | 每条父记录对应若干条子记录 | `count(子表) = count(父表) × rand(min, max)` |
+
+| relation_type | 语义             | 生成数量规则                                   |
+| ------------- | -------------- | ---------------------------------------- |
+| `1:1`         | 每条父记录恰好对应一条子记录 | `count(子表) = count(父表)`                  |
+| `1:0-1`       | 每条父记录对应零或一条子记录 | `count(子表) ≤ count(父表)`，按概率决定是否生成        |
+| `1:n`         | 每条父记录对应若干条子记录  | `count(子表) = count(父表) × rand(min, max)` |
+
 
 ---
 
@@ -319,15 +321,17 @@ type Connector interface {
 
 **各数据库 Connector 实现要点：**
 
-| 数据库 | 驱动 | Schema 查询来源 |
-|---|---|---|
-| MySQL | `go-sql-driver/mysql` | `information_schema.COLUMNS` + `KEY_COLUMN_USAGE` |
-| Postgres | `lib/pq` | `information_schema.COLUMNS` + `pg_constraint` |
-| Oracle | `godror` | `ALL_TAB_COLUMNS` + `ALL_CONSTRAINTS` |
-| MSSQL | `go-mssqldb` | `INFORMATION_SCHEMA.COLUMNS` + `sys.foreign_keys` |
-| SQLite | `mattn/go-sqlite3` | `PRAGMA table_info()` + `PRAGMA foreign_key_list()` |
-| ClickHouse | `ClickHouse/clickhouse-go` | `system.columns` |
-| Hive | `beltran/gohive` | `DESCRIBE FORMATTED` |
+
+| 数据库        | 驱动                         | Schema 查询来源                                         |
+| ---------- | -------------------------- | --------------------------------------------------- |
+| MySQL      | `go-sql-driver/mysql`      | `information_schema.COLUMNS` + `KEY_COLUMN_USAGE`   |
+| Postgres   | `lib/pq`                   | `information_schema.COLUMNS` + `pg_constraint`      |
+| Oracle     | `godror`                   | `ALL_TAB_COLUMNS` + `ALL_CONSTRAINTS`               |
+| MSSQL      | `go-mssqldb`               | `INFORMATION_SCHEMA.COLUMNS` + `sys.foreign_keys`   |
+| SQLite     | `mattn/go-sqlite3`         | `PRAGMA table_info()` + `PRAGMA foreign_key_list()` |
+| ClickHouse | `ClickHouse/clickhouse-go` | `system.columns`                                    |
+| Hive       | `beltran/gohive`           | `DESCRIBE FORMATTED`                                |
+
 
 ### 4.2 Scanner 与抽象类型映射
 
@@ -455,13 +459,15 @@ type AffectedGen struct {
 
 **Diff 处理规则：**
 
-| 变化类型 | 对已有生成器的影响 |
-|---|---|
-| 新增字段 | 自动创建新生成器，`confirmed_at = NULL`（待确认） |
-| 删除字段 | 标记生成器 `is_enabled = 0`，`ldb_scan_diffs` 记录，待用户确认处理方式 |
-| 类型变化 | 原生成器可能失效，`confirmed_at = NULL`（重置为待确认） |
-| 约束变化（nullable/unique）| 更新约束参数，`confirmed_at = NULL`（重置为待确认） |
-| 名称/注释变化 | 静默更新，不影响生成器，不写入 `ldb_scan_diffs` |
+
+| 变化类型                  | 对已有生成器的影响                                            |
+| --------------------- | ---------------------------------------------------- |
+| 新增字段                  | 自动创建新生成器，`confirmed_at = NULL`（待确认）                  |
+| 删除字段                  | 标记生成器 `is_enabled = 0`，`ldb_scan_diffs` 记录，待用户确认处理方式 |
+| 类型变化                  | 原生成器可能失效，`confirmed_at = NULL`（重置为待确认）               |
+| 约束变化（nullable/unique） | 更新约束参数，`confirmed_at = NULL`（重置为待确认）                 |
+| 名称/注释变化               | 静默更新，不影响生成器，不写入 `ldb_scan_diffs`                     |
+
 
 ---
 
@@ -739,12 +745,14 @@ TableConfigScreen（右侧 Tab，双击表节点打开）
 
 **UI 状态标识说明：**
 
-| 标识 | 颜色 | 含义 |
-|---|---|---|
-| `AUTO-INCREMENT` | 灰色 | 自增字段，已自动禁用生成 |
-| `待确认` | 橙色 | 系统自动推断，需用户检查并确认 |
-| `外键` | 蓝色 | 物理外键或逻辑外键 |
-| `⚠ N fields need review` | 表头警告 | 本表存在 N 个待确认字段 |
+
+| 标识                       | 颜色   | 含义              |
+| ------------------------ | ---- | --------------- |
+| `AUTO-INCREMENT`         | 灰色   | 自增字段，已自动禁用生成    |
+| `待确认`                    | 橙色   | 系统自动推断，需用户检查并确认 |
+| `外键`                     | 蓝色   | 物理外键或逻辑外键       |
+| `⚠ N fields need review` | 表头警告 | 本表存在 N 个待确认字段   |
+
 
 ---
 
@@ -795,16 +803,19 @@ Flutter: 有未确认 diff？
 
 ## 九、关键设计决策汇总
 
-| 决策点 | 方案选择 | 理由 |
-|---|---|---|
-| 持久化后端 | 环境变量切换，Migration 动态建表 | 支持 SQLite/MySQL/Postgres，零硬编码 DDL |
-| Schema 版本化 | `scan_version` 以表为粒度独立推进 | 全库/单表扫描互不干扰 |
-| 生成器确认状态 | 单字段 `confirmed_at`（NULL=待确认） | 消除冗余 `is_auto_mapped` 字段，逻辑更清晰 |
-| 表间数量关系 | 独立 `ldb_table_relations` 表 | 与"值从哪来"的 ldb_column_gen_configs 职责分离 |
-| 外键数量类型 | `1:1` / `1:0-1` / `1:n` + 倍数范围 | 覆盖业务中常见的三类数量约定 |
-| 自增字段处理 | 自动推断 `is_auto_increment`，`is_enabled=0` | 避免插入时与数据库序列冲突，直接确认无需用户操作 |
-| Fallback 生成器参数 | `generator_opts = "{}"` | 生成器内置默认值，升级时自动受益 |
-| Diff 确认持久化 | `ldb_scan_diffs.confirmed_at` | 确认后 UI 自动消除，历史可查 |
-| FFI 传输格式 | JSON 序列化 | 与产品设计一致，牺牲少量性能换开发便利性 |
-| 密码存储 | AES-256 加密后存储 | 避免连接密码明文落盘 |
-```
+
+| 决策点            | 方案选择                                    | 理由                                   |
+| -------------- | --------------------------------------- | ------------------------------------ |
+| 持久化后端          | 环境变量切换，Migration 动态建表                   | 支持 SQLite/MySQL/Postgres，零硬编码 DDL    |
+| Schema 版本化     | `scan_version` 以表为粒度独立推进                | 全库/单表扫描互不干扰                          |
+| 生成器确认状态        | 单字段 `confirmed_at`（NULL=待确认）            | 消除冗余 `is_auto_mapped` 字段，逻辑更清晰       |
+| 表间数量关系         | 独立 `ldb_table_relations` 表              | 与"值从哪来"的 ldb_column_gen_configs 职责分离 |
+| 外键数量类型         | `1:1` / `1:0-1` / `1:n` + 倍数范围          | 覆盖业务中常见的三类数量约定                       |
+| 自增字段处理         | 自动推断 `is_auto_increment`，`is_enabled=0` | 避免插入时与数据库序列冲突，直接确认无需用户操作             |
+| Fallback 生成器参数 | `generator_opts = "{}"`                 | 生成器内置默认值，升级时自动受益                     |
+| Diff 确认持久化     | `ldb_scan_diffs.confirmed_at`           | 确认后 UI 自动消除，历史可查                     |
+| FFI 传输格式       | JSON 序列化                                | 与产品设计一致，牺牲少量性能换开发便利性                 |
+| 密码存储           | AES-256 加密后存储                           | 避免连接密码明文落盘                           |
+| ```            |                                         |                                      |
+
+

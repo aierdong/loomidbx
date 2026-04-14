@@ -1,8 +1,8 @@
 ---
-name: Data Generator Memory
+
+## name: Data Generator Memory
 description: LoomiDBX 数据生成器的长期记忆要点（详设请查 docs/generator.md）
 type: reference
----
 
 # 数据生成器（长期记忆）
 

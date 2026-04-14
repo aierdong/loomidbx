@@ -1,14 +1,14 @@
 ---
 
 ## name: Database Schema & Connection
-description: LoomiDBX 数据库连接与 Schema 扫描的 steering 记忆（元数据层、Diff、AutoMap、FFI）
+description: LoomiDBX 数据库连接与 Schema 扫描的 steering 记忆（当前 schema、内存 Diff、AutoMap、FFI）
 type: reference
 
 # 数据库连接与 Schema 扫描（Steering）
 
 **权威详设**：`docs/schema.md`（DDL、完整接口签名、语义规则表以该文档为准。）
 
-**updated_at**：2026-04-11 — 从 `docs/schema.md` 提炼为项目记忆，便于实现与评审时对齐架构。
+**updated_at**：2026-04-14 — 对齐 spec-02：仅维护当前 schema，扫描快照仅内存态，Diff 必须经 UI 呈现。
 
 ---
 
@@ -23,7 +23,7 @@ Flutter UI  ← FFI(JSON) →  libloomidbx (Go)
 ```
 
 - **Connector**：各目标库的建连、`List`*、`DescribeTable`、`GetForeignKeys`；隔离驱动差异。
-- **Scanner**：`RawColumn` → 抽象类型、自增识别、与快照表同步、**Diff**。
+- **Scanner**：`RawColumn` → 抽象类型、自增识别、内存快照构建、**Diff**。
 - **Mapper**：扫描结果 → `ldb_column_gen_configs` / `ldb_table_gen_configs` / `ldb_table_relations` 的自动映射与优先级。
 - **StorageDriver**：LoomiDBX **自身**元数据 DB（非业务库）的 DDL 方言抽象与 Migration；与「用户要连的业务库」区分。
 
@@ -42,12 +42,11 @@ Flutter UI  ← FFI(JSON) →  libloomidbx (Go)
 
 | 领域   | 表                                                                               | 要点                                                                                          |
 | ---- | ------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| 连接   | `ldb_connections`                                                               | `db_type`、`extra` JSON；密码 **AES-256 落盘**，禁止明文。                                              |
-| 快照   | `ldb_table_schemas` / `ldb_column_schemas`                                      | 按连接+库+（schema）+表/列存扫描结果；`scan_version` **按表**递增。                                            |
-| 生成配置 | `ldb_table_gen_configs` / `ldb_column_gen_configs`                              | `confirmed_at`：`NULL` = 待确认（UI 橙色），非空 = 已确认；自增列 `is_enabled=0`。                             |
-| 表间数量 | `ldb_table_relations`                                                           | 与「列值从哪来」解耦；`relation_type`：`1:1` / `1:0-1` / `1:n` + `multiplier_`*。                        |
-| 扫描审计 | `ldb_scan_history` / `ldb_scan_diffs`                                           | `scan_scope`：`full_db` vs `single_table` + `scope_target`；diff 未确认前 `confirmed_at IS NULL`。 |
-| 运行历史 | `ldb_generation_runs` / `ldb_generation_run_tables` / `ldb_generation_run_logs` | 数据生成执行记录。与 `ldb_scan_history` 独立存储，避免跨域耦合。见 `steering/execution-engine.md`。                 |
+| 连接 | `ldb_connections` | `db_type`、`extra` JSON；密码 **AES-256 落盘**，禁止明文。`extra` 中可维护 `schema_trust_state` 与阻断原因。 |
+| 当前 Schema | `ldb_table_schemas` / `ldb_column_schemas` | 当前生效 schema 的唯一持久化来源；扫描完成后基于兼容性结果决定是否覆盖更新。 |
+| 生成配置 | `ldb_table_gen_configs` / `ldb_column_gen_configs` | 由 Diff 兼容性分析读取；不兼容时要求用户调整后再允许 schema 同步。 |
+| 表间数量 | `ldb_table_relations` | 与「列值从哪来」解耦；`relation_type`：`1:1` / `1:0-1` / `1:n` + `multiplier_`*。 |
+| 运行历史 | `ldb_generation_runs` / `ldb_generation_run_tables` / `ldb_generation_run_logs` | 数据生成执行记录，与扫描任务域解耦。见 `steering/execution-engine.md`。 |
 
 
 抽象类型枚举：`int` / `string` / `decimal` / `datetime` / `boolean`（映射与 Fallback 以此为准）。
@@ -62,20 +61,38 @@ Flutter UI  ← FFI(JSON) →  libloomidbx (Go)
 
 ---
 
-## 5. 扫描范围与版本
+## 5. 扫描范围、Diff 与同步
 
-- **全库扫描**：库下各表快照更新；相关表 `scan_version` 一并推进（语义以详设为准）。
-- **单表扫描**：仅目标表 `scan_version` +1，不扰动同库其他表。
-- **展示 diff**：以该表**最新一次**扫描记录为准（全库/单表共存时的冲突规则见详设 §八）。
+- **全库扫描**：在内存中构建全库 schema，与当前持久化 schema 对比。
+- **单表扫描**：只比较目标表结构，生成该范围的 Diff。
+- **Diff 呈现约束**：每次扫描产生的 Diff 都必须经 UI 呈现给用户（无论是否阻断）。
+- **同步约束**：无阻断风险可直接覆盖更新当前 schema；有阻断风险必须先调整生成器配置后再同步。
 
 ---
 
 ## 6. Diff 与生成器联动（原则）
 
 - `DiffType`：`added` / `removed` / `modified`（及内部 `unchanged`）。
-- **新增列**：新建生成器，`confirmed_at = NULL`。
-- **删除列**：生成器禁用等处理 + `ldb_scan_diffs`，待用户确认。
-- **类型/约束变化**：可能重置待确认；**名称/注释-only**：静默更新，**不写** `ldb_scan_diffs`。
+- **新增列**：允许自动建议生成器，进入待确认状态。
+- **删除列**：关联生成器进入风险清单；未处理前可阻断同步。
+- **类型/约束变化**：触发兼容性分析；阻断级风险要求先调整再同步。
+- **无生成器配置场景**：返回 `no_generator_config`（空风险），不作为错误。
+
+### 可信度状态机转换规则（必须遵守）
+
+| 当前状态 | 触发条件 | 下一状态 | 说明 |
+| ---- | ---- | ---- | ---- |
+| `trusted` | 连接配置变更（驱动、DSN、凭据、目标库切换） | `pending_rescan` | 当前 schema 的可信度下降，必须重扫后才能恢复可信。 |
+| `trusted` | 新扫描 Diff 存在阻断级风险 | `pending_adjustment` | 先调整生成器配置，再允许同步与执行。 |
+| `pending_rescan` | 重扫完成且无阻断级风险，并成功同步当前 schema | `trusted` | 重建“当前 schema 单一真相”。 |
+| `pending_rescan` | 重扫完成但仍有阻断级风险 | `pending_adjustment` | 需要用户先处理风险，不可直接恢复可信。 |
+| `pending_adjustment` | 风险已确认处理 + 同步成功 | `trusted` | 解除阻断，恢复执行准入。 |
+| `pending_adjustment` | 用户再次修改连接配置 | `pending_rescan` | 连接变化优先触发重扫要求。 |
+
+补充约束：
+
+- 未处于 `trusted` 时，必须向下游返回稳定的前置条件错误，阻断执行链路。
+- 不再维护扫描任务持久化表；扫描过程中的任务状态仅作为运行时上下文，不落库为独立历史实体。
 
 ---
 
@@ -94,14 +111,15 @@ Flutter UI  ← FFI(JSON) →  libloomidbx (Go)
 ## 8. FFI 约定
 
 - 入参/出参均为 **JSON**；统一 `{"ok", "data", "error"}`。
-- 关键导出：`TestConnection`、`SaveConnection`、`ListConnections`、`DeleteConnection`、`ListDatabases`、`ScanSchema`（`tableName` 空=全库）、`GetTableConfig`、`Save*GenConfig`、`SaveTableRelation`、`GetScanDiffs`、`ConfirmDiff` / `ConfirmAllDiffs`、`FreeString`。
+- 关键导出：`TestConnection`、`SaveConnection`、`ListConnections`、`DeleteConnection`、`ListDatabases`、`ScanSchema`（`tableName` 空=全库）、`GetTableConfig`、`Save*GenConfig`、`SaveTableRelation`、`PreviewSchemaDiff`、`GetGeneratorCompatibilityRisks`、`ApplySchemaSync`、`GetSchemaTrustState`、`FreeString`。
 - 实现新接口时保持与 `docs/schema.md` §六 清单一致，避免 Flutter 与 Go 两端漂移。
 
 ---
 
 ## 9. Flutter 侧要点
 
-- 连接树 → `ListDatabases` → `ScanSchema`；非首次扫描有 diff 时 **DiffDialog**，确认走 `ConfirmDiff` / `ConfirmAllDiffs`。
+- 连接树 → `ListDatabases` → `ScanSchema`；每次扫描后都展示 **DiffDialog**（含风险清单与同步动作）。
+- 无阻断风险时允许直接“同步当前 schema”；有阻断风险时引导用户修复配置后再同步。
 - 表配置页：表级配置 + 列列表 + 生成器面板；徽标：**自增灰**、**待确认橙**、**外键蓝**、表头待确认计数。
 
 ---
@@ -109,13 +127,13 @@ Flutter UI  ← FFI(JSON) →  libloomidbx (Go)
 ## 10. 关键决策速查
 
 
-| 主题          | 方案                                                   |
-| ----------- | ---------------------------------------------------- |
-| 元数据多后端      | 环境变量 + `StorageDriver` + Migration                   |
-| Schema 版本   | `scan_version` 表粒度，全库/单表可并存                          |
-| 用户确认状态      | 列级 `confirmed_at`，不用单独 `is_auto_mapped`              |
-| 表间数量 vs 外键值 | `ldb_table_relations` vs `ldb_column_gen_configs` 分工 |
-| FFI         | JSON 优先于手写 C 结构体                                     |
+| 主题 | 方案 |
+| ---- | ---- |
+| 元数据多后端 | 环境变量 + `StorageDriver` + Migration |
+| Schema 持久化 | 仅维护当前 schema（`ldb_table_schemas`/`ldb_column_schemas`），不保留扫描快照历史 |
+| 同步策略 | 无阻断风险可直接覆盖；阻断风险必须先调整生成器 |
+| 可信度状态 | `trusted` / `pending_rescan` / `pending_adjustment` |
+| FFI | JSON 优先于手写 C 结构体 |
 
 
 ---
