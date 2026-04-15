@@ -329,6 +329,261 @@ func (s *ConnectionStore) PatchConnectionSchemaExtra(ctx context.Context, connec
 	return s.UpsertConnection(ctx, *rec)
 }
 
+// LoadConnectionSchemaMeta 读取并解析连接 extra 中的 schema 子域元数据。
+//
+// 输入：
+// - ctx: 请求上下文。
+// - connectionID: 连接 ID。
+//
+// 输出：
+// - schema.ConnectionSchemaMeta: 解析后的读模型。
+// - error: 连接不存在或解析失败时返回错误。
+func (s *ConnectionStore) LoadConnectionSchemaMeta(ctx context.Context, connectionID string) (schema.ConnectionSchemaMeta, error) {
+	rec, err := s.GetConnectionByID(ctx, connectionID)
+	if err != nil {
+		return schema.ConnectionSchemaMeta{}, err
+	}
+	return schema.ParseConnectionSchemaMeta(rec.Extra)
+}
+
+// LoadCurrentSchema 按连接读取当前 schema（ldb_table_schemas / ldb_column_schemas）。
+//
+// 输入：
+// - ctx: 请求上下文。
+// - connectionID: 连接 ID。
+//
+// 输出：
+// - *schema.CurrentSchemaBundle: 当前 schema 聚合结果；无记录时返回空 bundle。
+// - error: 查询失败错误。
+func (s *ConnectionStore) LoadCurrentSchema(ctx context.Context, connectionID string) (*schema.CurrentSchemaBundle, error) {
+	trimmedConnectionID := strings.TrimSpace(connectionID)
+	if trimmedConnectionID == "" {
+		return nil, errors.New("connection_id is required")
+	}
+	bundle := &schema.CurrentSchemaBundle{
+		Tables:  make([]schema.TableSchemaPersisted, 0),
+		Columns: make([]schema.ColumnSchemaPersisted, 0),
+	}
+
+	tableRows, err := s.db.QueryContext(ctx, s.buildLoadCurrentSchemaTablesSQL(), trimmedConnectionID)
+	if err != nil {
+		return nil, fmt.Errorf("load current schema tables: %w", err)
+	}
+	defer tableRows.Close()
+	for tableRows.Next() {
+		var row schema.TableSchemaPersisted
+		var schemaName sql.NullString
+		var tableComment sql.NullString
+		if err := tableRows.Scan(
+			&row.ID,
+			&row.ConnectionID,
+			&row.DatabaseName,
+			&schemaName,
+			&row.TableName,
+			&tableComment,
+			&row.ScanVersion,
+			&row.ScannedAt,
+		); err != nil {
+			return nil, fmt.Errorf("scan current schema table row: %w", err)
+		}
+		row.SchemaName = strings.TrimSpace(schemaName.String)
+		row.TableComment = strings.TrimSpace(tableComment.String)
+		bundle.Tables = append(bundle.Tables, row)
+	}
+	if err := tableRows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate current schema table rows: %w", err)
+	}
+	if len(bundle.Tables) == 0 {
+		return bundle, nil
+	}
+
+	columnRows, err := s.db.QueryContext(ctx, s.buildLoadCurrentSchemaColumnsSQL(), trimmedConnectionID)
+	if err != nil {
+		return nil, fmt.Errorf("load current schema columns: %w", err)
+	}
+	defer columnRows.Close()
+	for columnRows.Next() {
+		var row schema.ColumnSchemaPersisted
+		var ordinalPos sql.NullInt64
+		var isPrimaryKey int
+		var isNullable int
+		var isUnique int
+		var isAutoIncrement int
+		var defaultValue sql.NullString
+		var columnComment sql.NullString
+		var fkRefTable sql.NullString
+		var fkRefColumn sql.NullString
+		var extra sql.NullString
+		if err := columnRows.Scan(
+			&row.ID,
+			&row.TableSchemaID,
+			&row.ColumnName,
+			&ordinalPos,
+			&row.DataType,
+			&row.AbstractType,
+			&isPrimaryKey,
+			&isNullable,
+			&isUnique,
+			&isAutoIncrement,
+			&defaultValue,
+			&columnComment,
+			&fkRefTable,
+			&fkRefColumn,
+			&extra,
+		); err != nil {
+			return nil, fmt.Errorf("scan current schema column row: %w", err)
+		}
+		if ordinalPos.Valid {
+			row.OrdinalPos = int(ordinalPos.Int64)
+		}
+		row.IsPrimaryKey = isPrimaryKey != 0
+		row.IsNullable = isNullable != 0
+		row.IsUnique = isUnique != 0
+		row.IsAutoIncrement = isAutoIncrement != 0
+		row.DefaultValue = strings.TrimSpace(defaultValue.String)
+		row.ColumnComment = strings.TrimSpace(columnComment.String)
+		row.FKRefTable = strings.TrimSpace(fkRefTable.String)
+		row.FKRefColumn = strings.TrimSpace(fkRefColumn.String)
+		row.Extra = strings.TrimSpace(extra.String)
+		bundle.Columns = append(bundle.Columns, row)
+	}
+	if err := columnRows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate current schema column rows: %w", err)
+	}
+	return bundle, nil
+}
+
+// TransactionalReplaceCurrentSchema 在同一事务内覆盖连接当前 schema（先删后写）。
+//
+// 输入：
+// - ctx: 请求上下文。
+// - connectionID: 连接 ID。
+// - next: 下一版当前 schema 聚合。
+//
+// 输出：
+// - error: 覆盖失败错误。
+func (s *ConnectionStore) TransactionalReplaceCurrentSchema(ctx context.Context, connectionID string, next *schema.CurrentSchemaBundle) error {
+	trimmedConnectionID := strings.TrimSpace(connectionID)
+	if trimmedConnectionID == "" {
+		return errors.New("connection_id is required")
+	}
+	if next == nil {
+		next = &schema.CurrentSchemaBundle{}
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("start replace current schema tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.ExecContext(ctx, s.buildDeleteColumnSchemasByConnectionIDSQL(), trimmedConnectionID); err != nil {
+		return fmt.Errorf("delete current schema columns: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, s.buildDeleteTableSchemasByConnectionIDSQL(), trimmedConnectionID); err != nil {
+		return fmt.Errorf("delete current schema tables: %w", err)
+	}
+
+	tableIDSet := make(map[string]struct{}, len(next.Tables))
+	for _, table := range next.Tables {
+		tableID := strings.TrimSpace(table.ID)
+		if tableID == "" {
+			return errors.New("table_schema.id is required")
+		}
+		tableConnectionID := strings.TrimSpace(table.ConnectionID)
+		if tableConnectionID != "" && tableConnectionID != trimmedConnectionID {
+			return fmt.Errorf("table_schema.connection_id mismatch: %s", tableID)
+		}
+		databaseName := strings.TrimSpace(table.DatabaseName)
+		tableName := strings.TrimSpace(table.TableName)
+		if databaseName == "" || tableName == "" {
+			return fmt.Errorf("table_schema database_name/table_name is required: %s", tableID)
+		}
+		scanVersion := table.ScanVersion
+		if scanVersion <= 0 {
+			scanVersion = 1
+		}
+		scannedAt := table.ScannedAt
+		if scannedAt <= 0 {
+			scannedAt = time.Now().Unix()
+		}
+		if _, err := tx.ExecContext(
+			ctx,
+			s.buildInsertCurrentSchemaTableSQL(),
+			tableID,
+			trimmedConnectionID,
+			databaseName,
+			nilIfEmpty(table.SchemaName),
+			tableName,
+			nilIfEmpty(table.TableComment),
+			scanVersion,
+			scannedAt,
+		); err != nil {
+			return fmt.Errorf("insert current schema table %s: %w", tableID, err)
+		}
+		tableIDSet[tableID] = struct{}{}
+	}
+
+	for _, column := range next.Columns {
+		columnID := strings.TrimSpace(column.ID)
+		if columnID == "" {
+			return errors.New("column_schema.id is required")
+		}
+		tableSchemaID := strings.TrimSpace(column.TableSchemaID)
+		if tableSchemaID == "" {
+			return fmt.Errorf("column_schema.table_schema_id is required: %s", columnID)
+		}
+		if _, ok := tableIDSet[tableSchemaID]; !ok {
+			return fmt.Errorf("column_schema.table_schema_id not found in tables: %s", columnID)
+		}
+		columnName := strings.TrimSpace(column.ColumnName)
+		dataType := strings.TrimSpace(column.DataType)
+		abstractType := strings.TrimSpace(column.AbstractType)
+		if columnName == "" || dataType == "" || abstractType == "" {
+			return fmt.Errorf("column_schema column_name/data_type/abstract_type is required: %s", columnID)
+		}
+		if _, err := tx.ExecContext(
+			ctx,
+			s.buildInsertCurrentSchemaColumnSQL(),
+			columnID,
+			tableSchemaID,
+			columnName,
+			column.OrdinalPos,
+			dataType,
+			abstractType,
+			boolToInt(column.IsPrimaryKey),
+			boolToInt(column.IsNullable),
+			boolToInt(column.IsUnique),
+			boolToInt(column.IsAutoIncrement),
+			nilIfEmpty(column.DefaultValue),
+			nilIfEmpty(column.ColumnComment),
+			nilIfEmpty(column.FKRefTable),
+			nilIfEmpty(column.FKRefColumn),
+			nilIfEmpty(column.Extra),
+		); err != nil {
+			return fmt.Errorf("insert current schema column %s: %w", columnID, err)
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit replace current schema tx: %w", err)
+	}
+	return nil
+}
+
+// PatchConnectionSchemaMeta 将 schema 子域 patch 合并写入 extra（语义同 PatchConnectionSchemaExtra，供 schema.TrustConnectionMetaRepository 实现）。
+//
+// 输入：
+// - ctx: 请求上下文。
+// - connectionID: 连接 ID。
+// - patch: 局部更新。
+//
+// 输出：
+// - error: 连接不存在或合并/写入失败时返回错误。
+func (s *ConnectionStore) PatchConnectionSchemaMeta(ctx context.Context, connectionID string, patch schema.ConnectionSchemaMetaPatch) error {
+	return s.PatchConnectionSchemaExtra(ctx, connectionID, patch)
+}
+
 // DeleteCredentialReferenceFunc 定义删除流程中的外部凭据清理回调。
 type DeleteCredentialReferenceFunc func(ctx context.Context, ref CredentialReference) error
 
@@ -479,6 +734,42 @@ func (s *ConnectionStore) buildGetConnectionByIDSQL() string {
 	`, s.placeholder(1))
 }
 
+// buildLoadCurrentSchemaTablesSQL 构建按连接加载表级当前 schema 的 SQL。
+func (s *ConnectionStore) buildLoadCurrentSchemaTablesSQL() string {
+	return fmt.Sprintf(`
+		SELECT id, connection_id, database_name, schema_name, table_name, table_comment, scan_version, scanned_at
+		FROM ldb_table_schemas
+		WHERE connection_id = %s
+		ORDER BY LOWER(database_name), LOWER(COALESCE(schema_name, '')), LOWER(table_name), id
+	`, s.placeholder(1))
+}
+
+// buildLoadCurrentSchemaColumnsSQL 构建按连接加载列级当前 schema 的 SQL。
+func (s *ConnectionStore) buildLoadCurrentSchemaColumnsSQL() string {
+	return fmt.Sprintf(`
+		SELECT
+			c.id,
+			c.table_schema_id,
+			c.column_name,
+			c.ordinal_pos,
+			c.data_type,
+			c.abstract_type,
+			c.is_primary_key,
+			c.is_nullable,
+			c.is_unique,
+			c.is_auto_increment,
+			c.default_value,
+			c.column_comment,
+			c.fk_ref_table,
+			c.fk_ref_column,
+			c.extra
+		FROM ldb_column_schemas c
+		INNER JOIN ldb_table_schemas t ON t.id = c.table_schema_id
+		WHERE t.connection_id = %s
+		ORDER BY LOWER(t.database_name), LOWER(COALESCE(t.schema_name, '')), LOWER(t.table_name), c.ordinal_pos, LOWER(c.column_name), c.id
+	`, s.placeholder(1))
+}
+
 // buildDeleteTableSchemasByConnectionIDSQL 构建按 connection_id 删除表快照记录的 SQL。
 func (s *ConnectionStore) buildDeleteTableSchemasByConnectionIDSQL() string {
 	return fmt.Sprintf(`DELETE FROM ldb_table_schemas WHERE connection_id = %s`, s.placeholder(1))
@@ -500,6 +791,26 @@ func (s *ConnectionStore) buildDeleteConnectionByIDSQL() string {
 // buildDeleteCredentialRefsByConnectionIDSQL 构建按 connection_id 删除凭据引用 SQL。
 func (s *ConnectionStore) buildDeleteCredentialRefsByConnectionIDSQL() string {
 	return fmt.Sprintf(`DELETE FROM ldb_connection_credentials WHERE connection_id = %s`, s.placeholder(1))
+}
+
+// buildInsertCurrentSchemaTableSQL 构建表级当前 schema 插入 SQL。
+func (s *ConnectionStore) buildInsertCurrentSchemaTableSQL() string {
+	return fmt.Sprintf(`
+		INSERT INTO ldb_table_schemas (
+			id, connection_id, database_name, schema_name, table_name, table_comment, scan_version, scanned_at
+		) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+	`, s.placeholder(1), s.placeholder(2), s.placeholder(3), s.placeholder(4), s.placeholder(5), s.placeholder(6), s.placeholder(7), s.placeholder(8))
+}
+
+// buildInsertCurrentSchemaColumnSQL 构建列级当前 schema 插入 SQL。
+func (s *ConnectionStore) buildInsertCurrentSchemaColumnSQL() string {
+	return fmt.Sprintf(`
+		INSERT INTO ldb_column_schemas (
+			id, table_schema_id, column_name, ordinal_pos, data_type, abstract_type,
+			is_primary_key, is_nullable, is_unique, is_auto_increment,
+			default_value, column_comment, fk_ref_table, fk_ref_column, extra
+		) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+	`, s.placeholder(1), s.placeholder(2), s.placeholder(3), s.placeholder(4), s.placeholder(5), s.placeholder(6), s.placeholder(7), s.placeholder(8), s.placeholder(9), s.placeholder(10), s.placeholder(11), s.placeholder(12), s.placeholder(13), s.placeholder(14), s.placeholder(15))
 }
 
 // buildInsertDummyTableSchemaSQL 构建测试辅助表快照插入 SQL。
@@ -726,4 +1037,21 @@ func (s *ConnectionStore) migrationTypeSet() migrationTypes {
 			CommentType:   "TEXT",
 		}
 	}
+}
+
+// nilIfEmpty 将空字符串转换为 nil，便于写入可空字段。
+func nilIfEmpty(v string) interface{} {
+	trimmed := strings.TrimSpace(v)
+	if trimmed == "" {
+		return nil
+	}
+	return trimmed
+}
+
+// boolToInt 将布尔值映射为 0/1，兼容多后端整数字段持久化。
+func boolToInt(v bool) int {
+	if v {
+		return 1
+	}
+	return 0
 }

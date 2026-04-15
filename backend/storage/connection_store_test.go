@@ -286,3 +286,250 @@ func TestDeleteConnectionCascade_dropsColumnSchemas(t *testing.T) {
 		t.Fatalf("want 0 column rows, got %d", colCount)
 	}
 }
+
+// TestCurrentSchemaRepository_ReplaceAndLoad 验证 CurrentSchemaRepository 的真实事务覆盖与读取行为。
+func TestCurrentSchemaRepository_ReplaceAndLoad(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "meta-current-schema.db")
+	store, err := NewConnectionStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	const connectionID = "conn-current-schema"
+	if err := store.UpsertConnection(ctx, ConnectionRecord{
+		ID:     connectionID,
+		Name:   "schema-conn",
+		DBType: "sqlite",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	first := &schema.CurrentSchemaBundle{
+		Tables: []schema.TableSchemaPersisted{
+			{
+				ID:           "tbl-users-v1",
+				ConnectionID: connectionID,
+				DatabaseName: "appdb",
+				SchemaName:   "public",
+				TableName:    "users",
+				TableComment: "users table",
+				ScanVersion:  1,
+				ScannedAt:    111111,
+			},
+		},
+		Columns: []schema.ColumnSchemaPersisted{
+			{
+				ID:              "col-users-id-v1",
+				TableSchemaID:   "tbl-users-v1",
+				ColumnName:      "id",
+				OrdinalPos:      1,
+				DataType:        "bigint",
+				AbstractType:    "int",
+				IsPrimaryKey:    true,
+				IsNullable:      false,
+				IsUnique:        true,
+				IsAutoIncrement: true,
+			},
+			{
+				ID:            "col-users-name-v1",
+				TableSchemaID: "tbl-users-v1",
+				ColumnName:    "name",
+				OrdinalPos:    2,
+				DataType:      "varchar(255)",
+				AbstractType:  "string",
+				IsNullable:    false,
+			},
+		},
+	}
+	if err := store.TransactionalReplaceCurrentSchema(ctx, connectionID, first); err != nil {
+		t.Fatalf("replace first schema failed: %v", err)
+	}
+
+	second := &schema.CurrentSchemaBundle{
+		Tables: []schema.TableSchemaPersisted{
+			{
+				ID:           "tbl-users-v2",
+				ConnectionID: connectionID,
+				DatabaseName: "appdb",
+				SchemaName:   "public",
+				TableName:    "users",
+				TableComment: "users table v2",
+				ScanVersion:  2,
+				ScannedAt:    222222,
+			},
+			{
+				ID:           "tbl-orders-v1",
+				ConnectionID: connectionID,
+				DatabaseName: "appdb",
+				SchemaName:   "public",
+				TableName:    "orders",
+				ScanVersion:  1,
+				ScannedAt:    333333,
+			},
+		},
+		Columns: []schema.ColumnSchemaPersisted{
+			{
+				ID:              "col-users-id-v2",
+				TableSchemaID:   "tbl-users-v2",
+				ColumnName:      "id",
+				OrdinalPos:      1,
+				DataType:        "bigint",
+				AbstractType:    "int",
+				IsPrimaryKey:    true,
+				IsNullable:      false,
+				IsUnique:        true,
+				IsAutoIncrement: true,
+			},
+			{
+				ID:            "col-users-email-v1",
+				TableSchemaID: "tbl-users-v2",
+				ColumnName:    "email",
+				OrdinalPos:    2,
+				DataType:      "varchar(255)",
+				AbstractType:  "string",
+				IsNullable:    true,
+				IsUnique:      true,
+			},
+			{
+				ID:            "col-orders-id-v1",
+				TableSchemaID: "tbl-orders-v1",
+				ColumnName:    "id",
+				OrdinalPos:    1,
+				DataType:      "bigint",
+				AbstractType:  "int",
+				IsPrimaryKey:  true,
+				IsNullable:    false,
+			},
+		},
+	}
+	if err := store.TransactionalReplaceCurrentSchema(ctx, connectionID, second); err != nil {
+		t.Fatalf("replace second schema failed: %v", err)
+	}
+
+	loaded, err := store.LoadCurrentSchema(ctx, connectionID)
+	if err != nil {
+		t.Fatalf("load current schema failed: %v", err)
+	}
+	if len(loaded.Tables) != 2 {
+		t.Fatalf("table count mismatch: got %d", len(loaded.Tables))
+	}
+	if len(loaded.Columns) != 3 {
+		t.Fatalf("column count mismatch: got %d", len(loaded.Columns))
+	}
+	if containsTableID(loaded.Tables, "tbl-users-v1") {
+		t.Fatalf("old table should have been replaced: %+v", loaded.Tables)
+	}
+	if !containsTableID(loaded.Tables, "tbl-orders-v1") {
+		t.Fatalf("new orders table should exist: %+v", loaded.Tables)
+	}
+	if !containsColumnID(loaded.Columns, "col-users-email-v1") {
+		t.Fatalf("new users.email column should exist: %+v", loaded.Columns)
+	}
+}
+
+// TestCurrentSchemaRepository_ReplaceRejectsOrphanColumn 验证事务覆盖会拒绝孤儿列并回滚到旧快照。
+func TestCurrentSchemaRepository_ReplaceRejectsOrphanColumn(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "meta-current-schema-invalid.db")
+	store, err := NewConnectionStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	const connectionID = "conn-current-schema-invalid"
+	if err := store.UpsertConnection(ctx, ConnectionRecord{
+		ID:     connectionID,
+		Name:   "schema-conn-invalid",
+		DBType: "sqlite",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	baseline := &schema.CurrentSchemaBundle{
+		Tables: []schema.TableSchemaPersisted{
+			{
+				ID:           "tbl-users-base",
+				ConnectionID: connectionID,
+				DatabaseName: "appdb",
+				SchemaName:   "public",
+				TableName:    "users",
+				ScanVersion:  1,
+				ScannedAt:    123456,
+			},
+		},
+		Columns: []schema.ColumnSchemaPersisted{
+			{
+				ID:            "col-users-id-base",
+				TableSchemaID: "tbl-users-base",
+				ColumnName:    "id",
+				OrdinalPos:    1,
+				DataType:      "bigint",
+				AbstractType:  "int",
+			},
+		},
+	}
+	if err := store.TransactionalReplaceCurrentSchema(ctx, connectionID, baseline); err != nil {
+		t.Fatalf("replace baseline schema failed: %v", err)
+	}
+
+	invalid := &schema.CurrentSchemaBundle{
+		Tables: []schema.TableSchemaPersisted{
+			{
+				ID:           "tbl-users-next",
+				ConnectionID: connectionID,
+				DatabaseName: "appdb",
+				SchemaName:   "public",
+				TableName:    "users",
+				ScanVersion:  2,
+				ScannedAt:    654321,
+			},
+		},
+		Columns: []schema.ColumnSchemaPersisted{
+			{
+				ID:            "col-orphan",
+				TableSchemaID: "missing-table-id",
+				ColumnName:    "orphan",
+				OrdinalPos:    1,
+				DataType:      "varchar(255)",
+				AbstractType:  "string",
+			},
+		},
+	}
+	if err := store.TransactionalReplaceCurrentSchema(ctx, connectionID, invalid); err == nil {
+		t.Fatal("expected orphan column validation error")
+	}
+
+	loaded, err := store.LoadCurrentSchema(ctx, connectionID)
+	if err != nil {
+		t.Fatalf("reload baseline schema failed: %v", err)
+	}
+	if len(loaded.Tables) != 1 || loaded.Tables[0].ID != "tbl-users-base" {
+		t.Fatalf("transaction should rollback to baseline tables: %+v", loaded.Tables)
+	}
+	if len(loaded.Columns) != 1 || loaded.Columns[0].ID != "col-users-id-base" {
+		t.Fatalf("transaction should rollback to baseline columns: %+v", loaded.Columns)
+	}
+}
+
+// containsTableID 判断表列表是否包含目标 ID。
+func containsTableID(tables []schema.TableSchemaPersisted, target string) bool {
+	for _, table := range tables {
+		if strings.TrimSpace(table.ID) == strings.TrimSpace(target) {
+			return true
+		}
+	}
+	return false
+}
+
+// containsColumnID 判断列列表是否包含目标 ID。
+func containsColumnID(columns []schema.ColumnSchemaPersisted, target string) bool {
+	for _, column := range columns {
+		if strings.TrimSpace(column.ID) == strings.TrimSpace(target) {
+			return true
+		}
+	}
+	return false
+}

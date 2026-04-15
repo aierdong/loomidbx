@@ -25,3 +25,18 @@ func TestParseSchemaTrustState_unknown(t *testing.T) {
 		t.Fatal("expected error")
 	}
 }
+
+func TestSchemaTrustAllowsDownstreamExecution(t *testing.T) {
+	if !SchemaTrustAllowsDownstreamExecution(SchemaTrustTrusted) {
+		t.Fatal("trusted should allow downstream")
+	}
+	if SchemaTrustAllowsDownstreamExecution(SchemaTrustPendingRescan) {
+		t.Fatal("pending_rescan must block downstream")
+	}
+	if SchemaTrustAllowsDownstreamExecution(SchemaTrustPendingAdjustment) {
+		t.Fatal("pending_adjustment must block downstream")
+	}
+	if !SchemaTrustAllowsDownstreamExecution("") {
+		t.Fatal("empty state defaults to trusted in parser; should allow downstream")
+	}
+}

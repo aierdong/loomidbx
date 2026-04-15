@@ -6,64 +6,69 @@
 - [x] 1.1 基于现有 `ldb_table_schemas` / `ldb_column_schemas` 调整“当前 schema”覆盖更新语义，并维护扫描任务运行时状态，不新增扫描任务持久化表、快照表或审计表。
   - 在 `ldb_connections.extra` 持久化 `schema_trust_state`、最近阻断原因，以及 `last_schema_scan_unix` / `last_schema_sync_unix`（与设计文档一致）；扫描任务上下文仅运行时内存模型。
   - _Requirements: 2.1, 2.4, 1.1_
-- [ ] 1.2 实现“自动/手动同步当前 schema”的事务语义：无阻断风险可直接覆盖，有阻断风险必须先调整。
+- [x] 1.2 实现“自动/手动同步当前 schema”的事务语义：无阻断风险可直接覆盖，有阻断风险必须先调整。
   - 覆盖写入失败、并发更新冲突、阻断风险未处理时拒绝同步。
   - _Requirements: 2.2, 2.3, 4.3_
 
-- [ ] 2. 实现扫描编排与内存快照构建
+- [x] 2. 实现扫描编排与内存快照构建
 - [x] 2.1 实现全库扫描流程：按确定性顺序读取表、列、主键、唯一约束与外键，并构建统一内存 schema 图。
   - 支持多方言抽象，保证输出结构一致。
   - _Requirements: 1.1, 1.2_
-- [ ] 2.2 实现单表扫描与按受影响表重扫策略，支持范围参数校验与任务状态跟踪。
+- [x] 2.2 实现单表扫描与按受影响表重扫策略，支持范围参数校验与任务状态跟踪。
   - 记录触发原因与范围，向上层返回任务 ID 与进度状态。
   - _Requirements: 1.1, 1.4, 5.1_
-- [ ] 2.3 构建扫描任务运行时生命周期状态机（running/completed/failed/cancelled）与查询接口。
+- [x] 2.3 构建扫描任务运行时生命周期状态机（running/completed/failed/cancelled）与查询接口。
   - 错误状态输出分类错误码，不包含敏感信息。
   - _Requirements: 1.3, 1.4_
-- [ ] 2.4 实现 schema 可信度状态机（`trusted`、`pending_rescan`、`pending_adjustment`）及状态迁移规则。
+- [x] 2.4 实现 schema 可信度状态机（`trusted`、`pending_rescan`、`pending_adjustment`）及状态迁移规则。
   - 覆盖连接变更触发 `pending_rescan`、阻断风险触发 `pending_adjustment`。
   - _Requirements: 5.4, 4.3_
 
-- [ ] 3. 实现“内存快照 vs 当前 schema”Diff 引擎
-- [ ] 3.1 实现对比算法，输出新增/删除/修改三级分类，并提供列级变化详情。
+- [x] 3. 实现“内存快照 vs 当前 schema”Diff 引擎
+- [x] 3.1 实现对比算法，输出新增/删除/修改三级分类，并提供列级变化详情。
   - 包含类型、可空性、默认值、约束、索引变化判定规则。
   - _Requirements: 3.1, 3.2, 3.4_
-- [ ] 3.2 实现首扫与异常场景处理（当前 schema 缺失、损坏、范围不兼容）。
+- [x] 3.2 实现首扫与异常场景处理（当前 schema 缺失、损坏、范围不兼容）。
   - 首扫需走初始化提示路径，不返回上下文缺失的半成品 Diff。
   - _Requirements: 3.3_
 
-- [ ] 4. 实现生成器兼容性风险分析与确认流程
-- [ ] 4.1 基于 Diff 与当前生成器配置生成风险清单（对象、原因、建议动作）。
+- [x] 4. 实现生成器兼容性风险分析与确认流程
+- [x] 4.1 基于 Diff 与当前生成器配置生成风险清单（对象、原因、建议动作）。
   - 至少识别字段删除、字段重命名/缺失、类型不兼容等阻断级风险。
   - _Requirements: 4.1, 4.3_
-- [ ] 4.2 实现 UI 必须展示 Diff 的契约语义，并提供“查看 Diff + 风险”和“执行同步”动作。
+- [x] 4.2 实现 UI 必须展示 Diff 的契约语义，并提供“查看 Diff + 风险”和“执行同步”动作。
   - 无阻断风险允许直接同步；有阻断风险必须先调整后同步。
   - _Requirements: 4.2, 4.3, 4.4_
-- [ ] 4.3 对阻断级风险实现流程闸门：未处理时禁止进入后续生成执行。
+- [x] 4.3 对阻断级风险实现流程闸门：未处理时禁止进入后续生成执行。
   - 输出稳定状态错误供 spec-03/spec-04 消费。
   - _Requirements: 4.3, 5.4_
-- [ ] 4.4 调整“无生成器配置”语义：返回 `no_generator_config` + 空风险列表，不作为错误。
+- [x] 4.4 调整“无生成器配置”语义：返回 `no_generator_config` + 空风险列表，不作为错误。
   - _Requirements: 4.5_
 
-- [ ] 5. 暴露 FFI/服务契约并强化范围控制
-- [ ] 5.1 增加扫描、状态查询、Diff 预览、风险查询、同步、重扫、可信度查询接口，并保持 JSON 契约一致性。
+- [x] 5. 暴露 FFI/服务契约并强化范围控制
+- [x] 5.1 增加扫描、状态查询、Diff 预览、风险查询、同步、重扫、可信度查询接口，并保持 JSON 契约一致性。
   - 统一 `ok/data/error` 外壳与错误码映射，并确保输出脱敏（不返回连接敏感信息）。
   - _Requirements: 1.4, 3.1, 4.2, 4.6, 5.2, 5.4_
-- [ ] 5.2 强化边界控制：扫描子系统拒绝任何数据生成或写入执行请求，返回明确范围外错误。
+- [x] 5.2 强化边界控制：扫描子系统拒绝任何数据生成或写入执行请求，返回明确范围外错误。
   - 补充边界契约测试，避免职责泄漏。
   - _Requirements: 5.3_
 
-- [ ] 6. 测试与跨 Spec 联调
-- [ ] 6.1 编写单元测试覆盖扫描标准化、Diff 分类、风险识别、同步闸门、可信度状态机、错误码映射。
+- [x] 6. 测试与跨 Spec 联调
+- [x] 6.1 编写单元测试覆盖扫描标准化、Diff 分类、风险识别、同步闸门、可信度状态机、错误码映射。
   - _Requirements: 1.2, 2.2, 3.2, 4.1, 5.4_
-- [ ] 6.2 编写集成测试覆盖全库扫描、单表重扫、内存对比、UI Diff 呈现契约、自动/手动同步全链路。
+- [x] 6.2 编写集成测试覆盖全库扫描、单表重扫、内存对比、UI Diff 呈现契约、自动/手动同步全链路。
   - 使用至少两种数据库方言样例验证兼容性。
   - _Requirements: 1.1, 2.1, 3.1, 4.2, 5.1, 5.4_
-- [ ] 6.3 执行跨 spec 联调检查：
+- [x] 6.3 执行跨 spec 联调检查：
   - 与 spec-03 验证“生成器配置兼容性闸门”；
   - 与 spec-04 验证“阻断级风险阻止执行”；
   - 与 spec-05/spec-07 验证扫描状态、Diff 与风险提示展示契约。
   - _Requirements: 4.3, 5.2, 5.4_
+  - 联调记录（B13）：
+    - [x] spec-03 兼容性闸门：`go test ./schema -run "Test(GetGeneratorCompatibilityRisks|GeneratorCompatibilityAnalyzer|ApplySchemaSync|SchemaSyncService|CheckExecutionBoundary|SchemaTrustGate|SchemaScanRuntimeStore_GetSchemaScanStatus|SchemaScanOrchestrator)" -count=1` 通过；覆盖生成器风险识别、阻断风险确认后才允许同步。
+    - [x] spec-04 阻断级风险阻止执行：同一命令通过；覆盖 `execution_boundary` 与 `schema_sync_service` 的阻断错误码传播（`FAILED_PRECONDITION`/阻断语义）。
+    - [x] spec-05/spec-07 展示契约：`go test ./ffi -run "TestSchemaFFIAdapter|TestSchemaIntegrationChain" -count=1` 通过；覆盖扫描状态、Diff 预览、风险摘要及 `can_apply_sync/requires_adjustment_before_sync` UI 契约字段。
+    - [!] 阻塞风险：仓库当前缺失 `.kiro/specs/spec-03-*`、`spec-04-*`、`spec-05-*`、`spec-07-*` 规格目录，以上联调基于代码契约测试而非对应规格文档逐条回放。
 
 ## Requirements Coverage Matrix（自检）
 

@@ -19,6 +19,20 @@ const (
 	SchemaTrustPendingAdjustment SchemaTrustState = "pending_adjustment"
 )
 
+// TrustBlockingReasonPendingRescan 为进入 pending_rescan 时写入 extra 的稳定原因短码（供 FFI/UI 分支）。
+const TrustBlockingReasonPendingRescan = "PENDING_RESCAN"
+
+// TrustBlockingReasonBlockingRisk 为进入 pending_adjustment 时写入 extra 的稳定原因短码（与 BLOCKING_RISK_UNRESOLVED 对齐）。
+const TrustBlockingReasonBlockingRisk = "BLOCKING_RISK_UNRESOLVED"
+
+// SchemaTrustAllowsDownstreamExecution 判定是否允许进入下游生成执行流程；仅 trusted 为 true（与 design.md 及 spec-4.3 衔接）。
+func SchemaTrustAllowsDownstreamExecution(state SchemaTrustState) bool {
+	if state == "" {
+		return true
+	}
+	return state == SchemaTrustTrusted
+}
+
 // ParseSchemaTrustState 将外部字符串解析为 SchemaTrustState。
 //
 // 输入：

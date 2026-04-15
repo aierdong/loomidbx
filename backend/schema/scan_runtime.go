@@ -54,6 +54,12 @@ type SchemaScanRuntimeContext struct {
 	// Trigger 为发起来源（用户操作/自动重扫等），仅用于诊断与日志聚合。
 	Trigger string
 
+	// RescanReason 为 StartSchemaRescan 的 reason；非重扫任务为空字符串。
+	RescanReason string
+
+	// RescanStrategy 为 full/impacted；非重扫任务为空字符串。
+	RescanStrategy string
+
 	// StartedAtUnix 为任务开始时间（Unix 秒）。
 	StartedAtUnix int64
 
