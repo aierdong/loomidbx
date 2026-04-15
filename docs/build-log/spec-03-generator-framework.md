@@ -1,0 +1,282 @@
+ > /validate-design: 当前spec: spec-03-generator-framework，请检查设计一致性
+
+## Design Review Summary
+
+`spec-03-generator-framework` 的设计整体方向与需求边界基本一致：单字段/单表生成、注册中心、配置校验、预览链路都已覆盖，且与 `spec-02`、`spec-04`、`spec-08/09` 的上下游边界有明确声明。
+同时，当前版本在“注册契约细化、审计字段完整性、类型映射覆盖度”上还有 3 个会影响实现一致性的关键缺口。
+综合判断：可进入实现，但建议先做小幅设计修订（带条件 GO），避免后续返工。
+
+## Critical Issues (≤3)
+
+🔴 Critical Issue 1: 注册中心契约未完整体现版本与生命周期操作
+Concern: 需求要求支持按 `ID + 版本 + 类型标签` 注册/查询，并支持启停与冲突检测；设计里的 API 列表未显式给出 `Register/Enable/Disable` 等生命周期接口，仅体现查询类接口。
+Impact: 实现阶段可能出现“先写运行时，再补注册治理”的逆向开发，导致插件扩展和冲突策略不稳定。
+Suggestion: 在 API Contract 增补 `RegisterGenerator`、`EnableGenerator`、`DisableGenerator`、`ResolveConflictPolicy`（含版本兼容策略字段）。
+Traceability: Requirement 1（1.2、1.3）
+Evidence: `design.md` 的 “API Contract（逻辑签名）”“Components and Interfaces/GeneratorRegistry”
+
+🔴 Critical Issue 2: 字段配置审计模型缺少“修改来源”落位定义
+Concern: 需求要求最小审计信息包含“修改时间 + 修改来源”；设计数据模型只明确了更新时间，没有给出 `modified_by/source` 的字段或来源枚举。
+Impact: 后续 UI/FFI 回显与问题追溯能力不足，尤其在多人协作或自动映射覆盖场景中难以判责。
+Suggestion: 在 `field_generator_configs` 逻辑模型增加 `modified_source`（如 `ui/manual`、`automap`、`migration`）与 `modified_by`（可选）字段定义，并在 `SaveFieldGeneratorConfig` 返回中透出。
+Traceability: Requirement 3（3.4）
+Evidence: `design.md` 的 “Data Models/Logical Data Model”“API Contract/SaveFieldGeneratorConfig”
+
+🔴 Critical Issue 3: MVP 类型映射未显式覆盖“枚举/集合类”
+Concern: 需求要求内置基础类型映射包含“枚举/集合类”；设计只给出 5 类抽象类型，未说明 enum/set 在 resolver 中的归约策略与默认生成器。
+Impact: 遇到 MySQL `ENUM/SET` 或等价类型时候选集不确定，可能触发错误或不一致行为。
+Suggestion: 在 `GeneratorTypeResolver` 规则补充“数据库原生枚举/集合 -> 抽象类型（通常 string）-> 默认生成器”的显式映射表，并在候选 API 中返回“映射依据”。
+Traceability: Requirement 2（2.1、2.3）
+Evidence: `design.md` 的 “Data Models/Capability Model”“Components/GeneratorTypeResolver”；`requirements.md` 的 2.x 条款
+
+## Design Strengths
+
+- 边界控制做得很清楚：明确“不做跨表编排/写入”，与 `execution-engine` steering 和 Requirement 5 高一致。
+- 可测试性与可演进性良好：已给出单测/集成/契约/跨 spec 联调策略，并预留 `spec-08/spec-09` 扩展点，风险可控。
+
+## Final Assessment
+
+Decision: GO（带条件）
+Rationale: 架构主干、职责分层、流程闭环已达到可实施标准；3 个问题都属于“契约细化缺口”，修订成本低但收益高，不会推翻当前设计。
+Next Steps: 先快速修订 `design.md`（补 API、审计字段、枚举映射说明）后进入任务实现；如你愿意，我可以下一步直接给出这 3 处的最小改动草案（按章节逐条可贴回文档）。
+
+## Interactive Discussion
+
+为保证你后续实现顺畅，我建议你先确认两点：
+
+- 你希望 `modified_source` 采用固定枚举（推荐）还是自由文本？
+- `ENUM/SET` 默认是否统一走 `string` 生成器，还是希望单独加 `enum` 类型生成器入口？
+
+---
+
+> 问题澄清：
+>
+> 1. modified_source 采用固定枚举
+> 2. ENUM 是一个通用生成器，它可以对应任何类型的生成器，取决于字段的类型。例如字段值从这些枚举中获取： [1, 2, 3...]，['x', 'y', 'z']
+>
+> 请根据你给出的问题，给出你的建议，也可以直接调整设计文件
+
+
+
+已根据你的澄清，直接更新了设计文件：`e:/git/loomidbx/.kiro/specs/spec-03-generator-framework/design.md`。
+
+## 我已做的调整
+
+- `modified_source` 固定枚举化
+  - 在数据模型中新增审计约束，`modified_source` 必填且固定枚举：
+  - `ui_manual` / `automap` / `schema_sync_migration` / `import_restore` / `system_patch`
+  - 同时补充 `modified_by`（可选）语义。
+- ENUM 按你定义改为“通用生成器”
+  - 新增 `EnumValueGenerator`（Builtin）作为通用候选值生成器。
+  - 明确它不绑定单一抽象类型，而是要求 `params.values[]` 与字段类型兼容（例如 `int` 用 `[1,2,3]`，`string` 用 `["x","y","z"]`）。
+  - 增加不兼容/混合类型时的字段级错误约束（`INVALID_ARGUMENT` + 错误路径定位）。
+- 补齐注册中心契约缺口
+  - 在 API Contract 增加 `RegisterGenerator`、`EnableGenerator`、`DisableGenerator`。
+  - 在错误策略中补充 `GENERATOR_CONFLICT`（版本策略不兼容时拒绝覆盖）。
+
+## 建议（可选，下一步）
+
+- 建议在后续 `tasks.md`里明确 2 条实现任务：
+  1. `modified_source` 的枚举校验与默认值策略（建议不设默认，强制调用方传入）
+  2. `EnumValueGenerator` 的类型验证器（含 `params.values[*]` 精确报错路径）
+
+如果你愿意，我下一步可以直接把这两条落到 `tasks.md`（含测试用例粒度）。
+
+如需，我可以继续把你这次确认的两点同步到 `requirements.md`（补一条“`modified_source` 固定枚举”验收标准，和一条“ENUM 通用生成器类型兼容”验收标准），这样需求-设计-任务链路会更闭环。
+
+
+
+> 请调整 tasks.md 和 requirements.md，落地这两点
+
+
+
+已完成落地，两个文件都已更新并与当前 `design.md` 保持一致。
+
+## 本次修改
+
+- 更新 `e:/git/loomidbx/.kiro/specs/spec-03-generator-framework/requirements.md`
+
+  - 在 Requirement 2 新增`2.5`：
+
+    - 明确 `ENUM` 是通用候选值生成能力，可配置候选集合，并按字段类型做一致性约束。
+
+  - 在 Requirement 3 新增`3.5`：
+
+    - 明确 `modified_source` 必须为固定枚举，非法值拒绝保存并返回字段级 `INVALID_ARGUMENT`。
+
+- 更新 `e:/git/loomidbx/.kiro/specs/spec-03-generator-framework/tasks.md`
+
+  - 新增任务 `2.4`：实现 `EnumValueGenerator` 与参数模型（支持按字段类型的候选值集合）。
+
+  - 新增任务 `3.4`：实现 `modified_source` 固定枚举校验与存储约束。
+
+  - 新增测试任务：`6.5/6.6`：
+
+    - `EnumValueGenerator` 类型一致性与混合类型拦截测试；
+    - `modified_source` 合法/非法取值的契约与集成测试。
+
+  - 更新 Requirements Coverage Matrix：
+
+    - `2.1–2.5`、`3.1–3.5` 覆盖关系已补齐。
+
+如果你希望，我可以下一步再帮你把 `tasks.md` 拆成“先做最小可运行子集（MVP）”和“增强项”两批，方便直接开工。
+
+
+
+> 当前Spec: spec-03-generator-framework
+>
+> 请查看下列3个问题，考虑他们是否成为问题，如果是，请修正：
+>
+> \---
+>
+> 关键问题 (3)
+>
+> 
+>
+> 🔴 问题 1: 数据模型缺少具体 DDL 定义
+>
+> 
+>
+> 问题: generator_definitions 和 field_generator_configs 仅描述为"逻辑模型"，未提供具体列定义、数据类型和约束。也未明确与 steering/database-schema.md 中 ldb_column_gen_configs 表名的对齐关系。
+>
+> 
+>
+> 建议: 补充具体表结构定义，包括关键字段、数据类型、约束条件。
+>
+> 
+>
+> \---
+>
+> 🔴 问题 2: Generator 接口未与 Steering 规范对齐
+>
+> 
+>
+> 问题: 设计定义了 GeneratorRegistry 和 GeneratorRuntime，但未明确 Generator 接口签名。Steering (generator.md) 已规定统一接口：Generate(ctx), GenerateBatch(ctx, count), Reset(), Type()。
+>
+> 
+>
+> 建议: 在 Components and Interfaces 章节显式添加 Generator 接口定义，并说明 GeneratorRuntime 如何调用此接口。
+>
+> 
+>
+> \---
+>
+> 🔴 问题 3: 种子策略与确定性复现机制未详述
+>
+> 
+>
+> 问题: 需求要求"同一配置与输入上下文下返回可复现结果"，但设计未说明：
+>
+> \- 种子如何传递至 Generator
+>
+> \- 全局种子与字段级种子的优先级关系
+>
+> \- 预览请求中的种子如何影响 GenerateBatch 调用
+>
+> 
+>
+> 建议: 补充种子策略章节，定义 seed_policy 字段取值、预览种子覆盖机制、与 steering/generator.md 中"全局 seed"的对齐方式。
+
+
+
+3 个问题都成立，我已在 `\.kiro/specs/spec-03-generator-framework/design.md` 完成修正。
+
+- 问题 1（DDL 缺失 + 表名未对齐）：成立
+  已新增 `Physical DDL Alignment` 章节，补了可执行层面的 DDL 草案与关键约束，并明确：
+  - `generator_definitions` 物理落地为 `ldb_generator_definitions`
+  - `field_generator_configs` 不新建同名表，直接对齐 `ldb_column_gen_configs`
+  - 说明唯一键、枚举约束、JSON 字段约束、运行时会话不落持久化主表
+- 问题 2（Generator 接口未对齐 steering）：成立
+  已新增 `Generator Interface（与 steering 对齐）`，显式定义接口签名： `Generate(ctx)` / `GenerateBatch(ctx, count)` / `Reset()` / `Type()`，并补充 `GeneratorRuntime` 调用约束（单样本与批量预览调用规则、Reset 使用边界、职责边界）。
+- 问题 3（种子策略与复现机制不完整）：成立
+  已新增 `Seed Strategy` 章节，补齐：
+  - `seed_policy` 结构与 `mode` 取值（`inherit_global | fixed | derive_from_row`）
+  - 全局 seed、字段 seed、预览 seed 的优先级
+  - 预览请求覆盖机制
+  - `GenerateBatch` 的批次根种子与行级派生规则（含前缀一致性约束）
+
+已完成第二轮检查，并做了两处修正，当前这 3 个关键问题相关内容是闭环的。
+
+- 修正 1：API 表格歧义
+  - 文件：`\.kiro/specs/spec-03-generator-framework/design.md`
+  - 将断裂的 `PreviewGeneration` 行修正为完整签名：`scope(field|table), seed?, sample_size`
+  - 同时统一了配置参数命名映射：`generator_opts(params)`，避免和 DDL 列名 `generator_opts` 脱节
+- 修正 2：任务覆盖矩阵遗漏
+  - 文件：`\.kiro/specs/spec-03-generator-framework/tasks.md`
+  - 在覆盖矩阵中补入：
+    - `2.5` -> `6.5`（EnumValueGenerator 类型一致性测试）
+    - `3.5` -> `6.6`（`modified_source` 固定枚举契约测试）
+    - `4.4` -> `6.4`（跨 spec 依赖联调）
+  - 这样矩阵与任务正文一致，不会在评审时出现“写了任务但矩阵没覆盖”的问题
+
+当前结论：
+你最初提的 3 个问题仍然是有效问题，并且现在在 `design.md` 中已经得到明确修复；本轮额外把文档内一致性问题也清掉了。若你愿意，我可以继续做第三轮“实现前检查”（仅检查是否可直接进入 `spec-impl`，不改内容）。
+
+
+
+---
+
+## Design Review Summary
+
+本轮 `spec-03-generator-framework` 设计整体质量较高：边界清晰、核心接口与种子策略已经明显补强，并且与 `spec-02/spec-04/spec-08/spec-09` 的协作关系有明确说明。
+但按 `design-review` 的“实现就绪”标准，仍有 2 个会直接影响落地一致性的关键缺口，建议先修完再进入实现。
+
+## Critical Issues (≤3)
+
+🔴 Critical Issue 1: 字段配置模型缺少“启用状态”落地定义
+Concern: 需求 `3.1` 明确要求字段配置包含“启用状态”，但设计的数据模型与 DDL 草案未明确该字段（如 `is_enabled`）的语义、默认值与约束。
+Impact: 实现阶段会出现“禁用字段如何参与候选解析/预览”的歧义，可能导致 UI/FFI/存储行为不一致。
+Suggestion: 在 `Data Models` 与 `Physical DDL Alignment` 补充 `is_enabled`（或等价字段）定义：默认值、读写规则、与预览行为关系（禁用是否跳过、返回何种 warning）。
+Traceability: Requirement `3.1`
+Evidence: `design.md` 的 `Logical Data Model` 与 `Physical DDL Alignment` 章节
+
+
+
+🔴 Critical Issue 2: `Generator.Type()` 返回类型在 steering 与设计间不一致
+Concern: 设计里 `Type() string`，而技术 steering 中示例为 `Type() GeneratorType`；若不统一会形成接口漂移。
+Impact: 直接影响插件实现、注册中心匹配以及 FFI 契约稳定性，后续重构成本高。
+Suggestion: 在设计中明确“最终采用 `string` 还是 `GeneratorType`”，并在同一处说明与 `steering/tech.md`、`steering/generator.md` 的对齐决策（必要时同步 steering 文档）。
+Traceability: Requirement `1.1`, `1.4`
+Evidence: `design.md` 的 `Generator Interface`；`steering/tech.md` 的 `Generator` 接口示例
+
+## Design Strengths
+
+- 新增的 `Generator Interface`、`Seed Strategy`、`DDL Alignment` 三块已经把之前核心风险（接口缺失、复现机制不清、逻辑模型过虚）显著收敛。
+- 架构边界控制到位：`spec-03` 明确不越界到跨表调度/写入，和 `spec-04` 职责分层清楚，后续实现更可控。
+
+## Final Assessment
+
+Decision: NO-GO（暂缓实现）
+Rationale: 当前剩余问题不多，但都属于“接口与数据模型契约级”问题，会影响多模块一致性，建议先修文档再进 `spec-impl`。
+Next Steps:
+
+1. 在 `design.md` 补齐 `is_enabled` 的模型与 DDL 约束。
+2. 统一 `Type()` 返回类型并同步相关 steering。
+3. 完成后再跑一次 `/validate-design spec-03-generator-framework`（预计可转 GO）。
+
+## Interactive Discussion
+
+你如果同意，我可以直接帮你把这两处文档改完（最小改动版），然后你再执行一遍 `/validate-design` 基本就能过。
+
+
+
+我会直接落地这两处修复：一是补齐 `is_enabled` 的模型/DDL/API 语义，二是统一 `Type()` 返回为 `GeneratorType` 并注明 FFI 序列化策略，随后给你一个简短变更说明。
+
+已按你要求直接改完，修改文件：`\.kiro/specs/spec-03-generator-framework/design.md`。
+
+本次改动点：
+
+- 补齐 `is_enabled` 全链路定义
+  - API：`SaveFieldGeneratorConfig` 请求/响应加入 `is_enabled`
+  - 逻辑模型：`field_generator_configs` 明确包含 `is_enabled`
+  - 语义：`is_enabled=false` 时跳过生成调用，并返回 `GENERATOR_DISABLED` warning
+  - DDL：在 `ldb_column_gen_configs` 草案中新增
+    `is_enabled BOOLEAN NOT NULL DEFAULT TRUE`
+  - 约束：补充 `is_enabled` 默认值及运行时行为说明
+- 统一 `Generator.Type()` 类型
+  - 接口从 `Type() string` 改为 `Type() GeneratorType`
+  - 新增对齐说明：领域层用强类型 `GeneratorType`，FFI JSON 层序列化为稳定字符串（如 `sequence`、`enum`）
+
+这两处就是上一轮评审的关键 NO-GO 项，现在已修复。
+你可以直接再跑一次 `/validate-design spec-03-generator-framework`。
+
