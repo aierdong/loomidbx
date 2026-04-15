@@ -475,7 +475,7 @@ _ 下一批前置条件：<满足/不满足 + 原因>
     - go.sum（更新）
   - 验证结果：
     - 命令：go test ./backend/... -v
-    - 结果摘要：通过（ok loomidbx/backend/app，ok loomidbx/backend/connector）
+    - 结果摘要：通过（ok loomidbx/app，ok loomidbx/connector）
     - 关键覆盖点：
         - TestConnection 为同步接口 ✓
       - timeout_sec 生效（默认 20s，支持覆盖，测试验证 2s/3s 超时）✓

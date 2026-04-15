@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"loomidbx/backend/app"
+	"loomidbx/app"
 )
 
 // ===== 5.2 连接测试集成测试 =====

@@ -11,7 +11,7 @@ import (
 	"fmt"
 	"runtime"
 
-	"loomidbx/backend/storage"
+	"loomidbx/storage"
 )
 
 const (

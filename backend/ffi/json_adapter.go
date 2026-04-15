@@ -12,7 +12,7 @@ import (
 	"context"
 	"encoding/json"
 
-	"loomidbx/backend/app"
+	"loomidbx/app"
 )
 
 // FFIResponse 是与权威文档一致的 FFI JSON 响应形状。

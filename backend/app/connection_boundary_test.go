@@ -3,8 +3,8 @@ package app_test
 import (
 	"context"
 	"testing"
-
-	"loomidbx/backend/app"
+	
+	"loomidbx/app"
 )
 
 // ===== 6.1 与 spec-02 衔接假验 =====
@@ -71,7 +71,7 @@ func TestBoundary_DeleteConnection_NoScanHistoryWrite(t *testing.T) {
 
 	// 执行级联删除（确认后）
 	_ = svc.DeleteConnection(context.Background(), app.DeleteConnectionRequest{
-		ID:            id,
+		ID:             id,
 		ConfirmCascade: true,
 	})
 
@@ -210,7 +210,7 @@ func TestBoundary_DeleteConnectionConfirmationRequired(t *testing.T) {
 
 	// 不带确认的删除应返回 CONFIRMATION_REQUIRED
 	errObj := svc.DeleteConnection(context.Background(), app.DeleteConnectionRequest{
-		ID:            id,
+		ID:             id,
 		ConfirmCascade: false,
 	})
 

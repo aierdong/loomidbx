@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"loomidbx/backend/schema"
+	"loomidbx/schema"
 )
 
 // TestBuildConnectionUpsertSQLByBackend 验证不同存储后端生成不同 upsert 方言。

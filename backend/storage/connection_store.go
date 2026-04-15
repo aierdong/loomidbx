@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"loomidbx/backend/schema"
+	"loomidbx/schema"
 
 	_ "modernc.org/sqlite"
 )

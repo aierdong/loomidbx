@@ -3,8 +3,9 @@ package app
 import (
 	"context"
 	"errors"
-	"loomidbx/backend/connector"
-	"loomidbx/backend/storage"
+	
+	"loomidbx/connector"
+	"loomidbx/storage"
 )
 
 const (

@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"loomidbx/backend/app"
-	"loomidbx/backend/storage"
+	"loomidbx/app"
+	"loomidbx/storage"
 )
 
 func newService(t *testing.T) (*app.ConnectionService, *storage.ConnectionStore) {

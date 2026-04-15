@@ -5,9 +5,9 @@ import (
 	"strings"
 	"testing"
 
-	"loomidbx/backend/app"
-	"loomidbx/backend/ffi"
-	"loomidbx/backend/storage"
+	"loomidbx/app"
+	"loomidbx/ffi"
+	"loomidbx/storage"
 )
 
 // ===== 5.3 FFI Golden/契约快照测试 =====

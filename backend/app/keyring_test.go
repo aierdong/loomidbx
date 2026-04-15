@@ -6,7 +6,7 @@ import (
 	"runtime"
 	"testing"
 
-	"loomidbx/backend/storage"
+	"loomidbx/storage"
 )
 
 func TestNewPlatformKeyringAccessor(t *testing.T) {

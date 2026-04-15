@@ -14,6 +14,7 @@ type SQLDialect string
 const (
 	// SQLDialectMySQL 表示 MySQL 方言。
 	SQLDialectMySQL SQLDialect = "mysql"
+	
 	// SQLDialectPostgres 表示 PostgreSQL 方言。
 	SQLDialectPostgres SQLDialect = "postgres"
 )

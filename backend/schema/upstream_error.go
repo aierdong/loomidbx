@@ -9,10 +9,13 @@ import (
 const (
 	// UpstreamCodeDeadlineExceeded 表示在超时边界内未完成（包含上游超时与本地超时）。
 	UpstreamCodeDeadlineExceeded = "DEADLINE_EXCEEDED"
+
 	// UpstreamCodeUpstreamUnavailable 表示目标数据库不可达或连接被拒绝。
 	UpstreamCodeUpstreamUnavailable = "UPSTREAM_UNAVAILABLE"
+
 	// UpstreamCodeAuthFailed 表示认证失败（用户名/密码错误等）。
 	UpstreamCodeAuthFailed = "AUTH_FAILED"
+
 	// UpstreamCodePermissionDenied 表示上游数据库权限不足（无读取元数据权限等）。
 	UpstreamCodePermissionDenied = "PERMISSION_DENIED"
 )
@@ -183,4 +186,3 @@ func sanitizeCommonCredentialPatterns(msg string) string {
 	}
 	return out
 }
-

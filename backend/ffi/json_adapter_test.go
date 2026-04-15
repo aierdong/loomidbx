@@ -5,9 +5,9 @@ import (
 	"strings"
 	"testing"
 
-	"loomidbx/backend/app"
-	"loomidbx/backend/ffi"
-	"loomidbx/backend/storage"
+	"loomidbx/app"
+	"loomidbx/ffi"
+	"loomidbx/storage"
 )
 
 // FFI 响应应包含 ok/data/error 结构。

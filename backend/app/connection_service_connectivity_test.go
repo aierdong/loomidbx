@@ -3,9 +3,9 @@ package app_test
 import (
 	"context"
 	"testing"
-
-	"loomidbx/backend/app"
-	"loomidbx/backend/connector"
+	
+	"loomidbx/app"
+	"loomidbx/connector"
 )
 
 // SQLite 连接测试应成功（内存数据库）。
@@ -50,9 +50,9 @@ func TestConnectionUnsupportedDbType(t *testing.T) {
 func TestConnectionNetworkUnreachable(t *testing.T) {
 	svc, _ := newService(t)
 	errObj := svc.TestConnection(context.Background(), app.ConnectionRequest{
-		DBType:   "mysql",
-		Host:     "10.255.255.1", // 不可达地址
-		Port:     3306,
+		DBType:     "mysql",
+		Host:       "10.255.255.1", // 不可达地址
+		Port:       3306,
 		TimeoutSec: 2,
 	})
 	if errObj == nil {
@@ -89,10 +89,10 @@ func TestConnectionErrorNoPasswordLeak(t *testing.T) {
 	svc, _ := newService(t)
 	secret := "super-secret-password-123"
 	errObj := svc.TestConnection(context.Background(), app.ConnectionRequest{
-		DBType:   "mysql",
-		Host:     "10.255.255.1",
-		Port:     3306,
-		Password: secret,
+		DBType:     "mysql",
+		Host:       "10.255.255.1",
+		Port:       3306,
+		Password:   secret,
 		TimeoutSec: 2,
 	})
 	if errObj == nil {

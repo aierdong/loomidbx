@@ -5,12 +5,16 @@ import "strings"
 const (
 	// AbstractTypeInt 表示整型抽象类型。
 	AbstractTypeInt = "int"
+
 	// AbstractTypeString 表示字符串抽象类型。
 	AbstractTypeString = "string"
+
 	// AbstractTypeDecimal 表示小数/浮点抽象类型。
 	AbstractTypeDecimal = "decimal"
+
 	// AbstractTypeDatetime 表示日期时间抽象类型。
 	AbstractTypeDatetime = "datetime"
+	
 	// AbstractTypeBoolean 表示布尔抽象类型。
 	AbstractTypeBoolean = "boolean"
 )

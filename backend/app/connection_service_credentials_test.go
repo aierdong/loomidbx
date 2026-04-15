@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"loomidbx/backend/app"
+	"loomidbx/app"
 )
 
 // 凭据解析优先级固定为 env > keyring > AES。

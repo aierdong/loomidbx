@@ -5,10 +5,11 @@ import (
 	"database/sql"
 	"errors"
 	"testing"
-
-	"loomidbx/backend/app"
-	"loomidbx/backend/storage"
+	
 	_ "modernc.org/sqlite"
+
+	"loomidbx/app"
+	"loomidbx/storage"
 )
 
 // 更新连接时应保持连接 ID 不变。

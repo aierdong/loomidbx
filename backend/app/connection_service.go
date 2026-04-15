@@ -7,8 +7,8 @@ import (
 
 	"github.com/google/uuid"
 
-	"loomidbx/backend/connector"
-	"loomidbx/backend/storage"
+	"loomidbx/connector"
+	"loomidbx/storage"
 )
 
 // NewConnectionService 创建连接应用服务实例。

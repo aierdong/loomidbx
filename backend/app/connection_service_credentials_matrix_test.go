@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"loomidbx/backend/app"
+	"loomidbx/app"
 )
 
 // ===== 5.1 凭据解析优先级组合矩阵测试 =====
