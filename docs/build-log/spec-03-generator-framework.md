@@ -280,3 +280,178 @@ Next Steps:
 这两处就是上一轮评审的关键 NO-GO 项，现在已修复。
 你可以直接再跑一次 `/validate-design spec-03-generator-framework`。
 
+
+
+---
+
+> 1. @.kiro/specs/spec-03-generator-framework/design.md:181  生成器指的是对什么类型字段的生成什么匹配的数据。与  connection_id 无关。因此  ListGeneratorCapabilities 只与 field_type 相关，与 connection_id 无关。 
+> 2. @.kiro/specs/spec-03-generator-framework/design.md:258 生成器是”硬编码“实现的，因此它没有所谓状态。
+> 3. 生成器是通过编码实现的，例如根据用户输入的“正则表达式”生成数据。生成器注册是为多个不同类型的生成器扩展而设计的。设计中通过“ldb_generator_definitions”表保存，这让我不能理解。我认为注册是通过“注册表”的形式对外公布已有的生成器及其能力，它不需要数据库保存，这没有意义。请检查设计，是我理解有误，还是设计有误
+
+你的理解基本正确，设计里确实有几处概念混淆，我逐条核对如下：
+
+- 结论 1（你说得对）：`ListGeneratorCapabilities` 不应依赖 `connection_id`
+  这个接口语义是“列出生成器能力”，本质应按 `field_type`（或空表示全部）过滤。`connection_id` 属于 schema 上下文，应该放在 `GetFieldGeneratorCandidates` 这类“按具体字段推候选”接口里。当前 `design.md` 把两者混在一起了。
+- 结论 2（你部分对）：`lifecycle_state` 这类“定义状态”不该作为持久化主模型，但“生成器无状态”不能一概而论
+  你说“硬编码实现没有状态”对注册定义层是成立的；但对运行时实例不一定成立，比如序列类生成器是可能有状态的。
+  设计里真正不协调的是：把“编译时注册”同时又建成了“数据库定义 + 启停 API”的运行时控制体系，层次混了。
+- 结论 3（你说得对）：`ldb_generator_definitions` 这张表在当前方案下意义很弱，甚至是反模式
+  既然基线是“编译时注册（非动态插件）”，注册表应该是代码内存结构（元数据 + 构造器），不是数据库主数据。
+  数据库更应该只存字段配置（例如 `ldb_column_gen_configs`），不应再存“生成器定义事实”。
+
+建议你把 `spec-03` 改成这套更一致的口径：
+
+- `ListGeneratorCapabilities(field_type?)`：去掉 `connection_id`
+- 删除 `EnableGenerator` / `DisableGenerator`（若保留，仅做进程内策略开关，不落库）
+- 删除逻辑模型 `generator_definitions` 与物理表 `ldb_generator_definitions`
+- 保留并强化 `field_generator_configs -> ldb_column_gen_configs`
+- 文档里明确“状态分层”：
+  - 注册定义：静态、编译时、无持久化
+  - 运行实例：可有状态（如 sequence），通过 `Reset()` 管理
+
+如果你愿意，我可以直接帮你把 `design.md` 按上述口径改一版（包括接口表、数据模型、DDL 对齐和术语说明）。
+
+
+
+> 关于结论2：“lifecycle_state 这类“定义状态”不该作为持久化主模型，但“生成器无状态”不能一概而论... 比如序列类生成器是可能有状态的”。我所说的 lifecycle_state 指的是生命周期状态：enabled, disabled, deprecated。它与 “序列化生成器" 的”状态“是两个概念（这里的状态是指持有可变数据），不要混淆了。我指的是**不需要生命周期状态**，EnableGenerator，DisableGenerator 这些都是不必要的。并不需要 generator_definitions 的”lifecycle_state“， 也不需要表 ldb_generator_definitions。
+>
+> 其它的调整，请按照你的理解来进行（可能不仅仅是 design.md, 还包括 requirements.md 和 tasks.md
+
+已按你的口径完成调整，并同步到了 3 份文档，核心是：移除生命周期状态模型与相关启停接口，保留编译时注册 + 运行时能力查询。
+
+已修改文件：
+
+- `/.kiro/specs/spec-03-generator-framework/design.md`
+- `/.kiro/specs/spec-03-generator-framework/requirements.md`
+- `/.kiro/specs/spec-03-generator-framework/tasks.md`
+
+具体改动：
+
+- 在 `design.md` 中：
+  - 删除 `EnableGenerator`、`DisableGenerator`
+  - `RegisterGenerator` 请求参数移除 `lifecycle_state`
+  - `ListGeneratorCapabilities` 改为仅 `field_type?`（去掉 `connection_id?`）
+  - 删除 `generator_definitions` 逻辑主模型与 `ldb_generator_definitions` DDL 方案
+  - 新增并明确：生成器注册信息是进程内 `generator_registry_snapshot`，不落库
+  - 保留并强化：`generator_id + version` 的冲突检测在注册表内完成（返回 `GENERATOR_CONFLICT`）
+- 在 `requirements.md` 中：
+  - Requirement 1.2 从“注册、查询、启停、冲突检测”改为“注册、查询、冲突检测”
+- 在 `tasks.md` 中：
+  - 任务 1.2 从“支持注册、查询、启停、重复冲突检测”改为“支持注册、查询、重复冲突检测”
+
+自检结果：
+
+- `spec-03` 目录内已无 `EnableGenerator`、`DisableGenerator`、`lifecycle_state`、`启停` 残留。
+- 现在三份文档在该议题上已一致。
+
+如果你希望，我可以再做一版“术语统一清理”（例如把 `generator_registry_snapshot` 在全篇再统一成更短名称，如 `registered_generators`），让文档更易读。
+
+
+
+> 好的,请”术语统一清理“
+
+
+
+术语统一清理已完成。
+
+这次统一结果：
+
+- 将 `generator_registry_snapshot / 注册表快照` 统一为
+  `registered_generators / 已注册生成器清单`
+- 保持 `GeneratorRegistry` 作为组件名不变（这是类型名，不是业务术语）
+
+已更新位置：`/.kiro/specs/spec-03-generator-framework/design.md`
+
+  - 逻辑数据模型条目改名为 `registered_generators`
+  - 能力查询说明改为“直接读取已注册生成器清单”
+
+一致性检查结果：
+
+- `spec-03` 三份文档中不再出现 `generator_registry_snapshot` 或“注册表快照”旧术语。
+- `requirements.md` 和 `tasks.md` 当前无需额外术语替换，和 `design.md` 语义一致。
+
+
+
+---
+
+## Design Review Summary
+
+`spec-03-generator-framework` 的设计整体质量较高，范围边界、职责拆分、接口契约和可扩展点与需求文档及 steering 上下文基本一致。
+从可实现性看，已具备直接进入实现阶段的条件，风险主要集中在“schema 变更后候选生成器重判定”的触发闭环是否足够明确。
+结论倾向 GO（建议先补一个小的设计澄清项）。
+
+## Critical Issues (≤3)
+
+🔴 Critical Issue 1: Schema 变更后的“重判定触发路径”不够显式
+Concern: 设计明确了保存配置时会做候选解析与校验，但对“`spec-02` 同步后如何自动触发既有字段配置重判定并输出不兼容提示”的流程未形成独立流程/状态迁移约束。
+Impact: 可能出现旧配置在 schema 已变化时未及时暴露风险，影响 Requirement 2.2 的一致性与可预期性。
+Suggestion: 在设计中新增“Schema Sync -> Revalidate Existing Field Configs -> Emit Incompatibility Report”的显式流程（可挂在 `GeneratorConfigService` 或单独 `CompatibilityRecheckService`），并定义触发时机（同步后立即、首次读取时惰性、或两者结合）。
+Traceability: Requirement 2.2、2.4（类型变化重判定与可定位错误）
+Evidence: `design.md` 的“字段规则配置与校验流程”“Requirements Traceability”“Error Handling”章节（已有校验与错误码，但缺少 schema 变更后的主动重判定闭环描述）。
+
+## Design Strengths
+
+- 边界控制非常清晰：`GeneratorRegistry` / `GeneratorConfigService` / `GeneratorPreviewService` / `GeneratorRuntime` 的职责拆分与 `spec-04` 执行域隔离明确，符合 steering 的分层与职责约束。
+- 契约与可复现性设计扎实：`seed_policy` 结构、优先级和 runtime 传递规则定义完整，且与 `generator.md` 中接口与“全局 seed 可追溯”原则保持一致。
+
+## Final Assessment
+
+Decision: GO（带1项实现前澄清）
+
+Rationale: 当前设计不存在架构级冲突，绝大多数需求有明确落点且实现路径清楚；仅有一个高影响但低改动成本的闭环澄清项。补齐后可显著降低 schema 变更场景下的运行风险。
+
+Next Steps:
+
+- 在 `design.md` 补充“schema 同步后重判定”流程与触发时机说明（建议加一段 sequence diagram 或状态机补充）。
+- 补充后可直接执行 `/kiro/spec-tasks spec-03-generator-framework`（如你希望我继续，我可以直接帮你起草这段补丁文本）。
+
+## Interactive Discussion
+
+你更倾向哪种触发策略？
+
+- A：schema 同步成功后立即全量重判定（更稳健）
+- B：按读取/预览时惰性重判定（更省资源）
+- C：A+B 结合（同步后预计算 + 运行时兜底）
+
+你选定后，我可以按该策略给出一版最小改动的设计补充内容。
+
+
+
+已按 A 方案完成设计文档更新，改动在 `/.kiro/specs/spec-03-generator-framework/design.md`。
+
+主要补充点：
+
+- 新增章节 “Schema 同步后立即全量重判定流程（A 方案）”（含 Mermaid 时序图）。
+- 明确 4 条约束：
+  - `ApplySchemaSync` 成功后立即触发，不允许仅靠惰性触发。
+  - 作用范围是该连接下全部字段配置。
+  - 不兼容必须返回字段定位和修复建议，禁止静默跳过。
+  - 阻断风险与 `spec-02` 可信度状态联动，进入 `pending_adjustment`。
+- 在 Requirements Traceability 中把 Requirement 2.x 扩展为包含 `CompatibilityRecheckService` 与 `RevalidateAllConfigs`。
+- 在 Components and Interfaces 中新增 `CompatibilityRecheckService` 组件定义。
+- 在 Error Strategy 中新增“schema 同步后重判定不兼容”错误语义（`FAILED_PRECONDITION`）。
+- 在 Testing Strategy 中将跨 spec 联调改为验证“同步成功后立即触发重判定并输出报告”。
+
+另外我已做过一次文档诊断检查，当前无新增 linter 问题。
+如果你需要，我可以继续基于这个版本再跑一轮 `/validate-design spec-03-generator-framework` 的最终评审口径（只给结论和风险清单）。
+
+已按 A 方案完成设计文档更新，改动在 `/.kiro/specs/spec-03-generator-framework/design.md`。
+
+主要补充点：
+
+- 新增章节 “Schema 同步后立即全量重判定流程（A 方案）”（含 Mermaid 时序图）。
+- 明确 4 条约束：
+  - `ApplySchemaSync` 成功后立即触发，不允许仅靠惰性触发。
+  - 作用范围是该连接下全部字段配置。
+  - 不兼容必须返回字段定位和修复建议，禁止静默跳过。
+  - 阻断风险与 `spec-02` 可信度状态联动，进入 `pending_adjustment`。
+- 在 Requirements Traceability 中把 Requirement 2.x 扩展为包含 `CompatibilityRecheckService` 与 `RevalidateAllConfigs`。
+- 在 Components and Interfaces 中新增 `CompatibilityRecheckService` 组件定义。
+- 在 Error Strategy 中新增“schema 同步后重判定不兼容”错误语义（`FAILED_PRECONDITION`）。
+- 在 Testing Strategy 中将跨 spec 联调改为验证“同步成功后立即触发重判定并输出报告”。
+
+另外我已做过一次文档诊断检查，当前无新增 linter 问题。
+如果你需要，我可以继续基于这个版本再跑一轮 `/validate-design spec-03-generator-framework` 的最终评审口径（只给结论和风险清单）。
+
+
+

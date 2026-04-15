@@ -86,6 +86,7 @@ var Migrations = []Migration{
     {Version: 6, Up: createTableRelationsTable},
     {Version: 7, Up: createScanHistoryTable},
     {Version: 8, Up: createScanDiffsTable},
+    {Version: 9, Up: enhanceColumnGenConfigsForSpec03},
 }
 
 func RunMigrations(d StorageDriver) error {
@@ -200,6 +201,12 @@ CREATE TABLE ldb_column_gen_configs (
     generator_type    TEXT NOT NULL,        -- 见§五 生成器类型枚举
     generator_opts    TEXT NOT NULL DEFAULT '{}',  -- JSON，空时生成器使用内置默认值
     is_enabled        INTEGER NOT NULL DEFAULT 1,  -- 自增字段自动为 0
+    null_policy       TEXT NOT NULL DEFAULT 'respect_nullable', -- respect_nullable/force_non_null/force_null_ratio
+    seed_policy       TEXT,                 -- JSON 字符串：seed 策略
+    config_version    INTEGER NOT NULL DEFAULT 1,
+    modified_source   TEXT NOT NULL DEFAULT 'ui_manual', -- ui_manual/automap/schema_sync_migration/import_restore/system_patch
+    modified_by       TEXT,
+    updated_at        INTEGER,
     logic_fk_table    TEXT,                 -- 逻辑外键：关联表（用户手动指定）
     logic_fk_column   TEXT,                 -- 逻辑外键：关联列（用户手动指定）
     confirmed_at      INTEGER,              -- NULL=待确认；非NULL=已确认时间戳

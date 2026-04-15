@@ -131,7 +131,7 @@ sequenceDiagram
   FFI->>Preview: Preview(request)
   Preview->>Repo: LoadConfigs(scope)
   Repo-->>Preview: field configs
-  Preview->>Registry: Resolve(config.generator_id)
+  Preview->>Registry: Resolve(config.generator_type)
   Registry-->>Preview: generator instance + capability
   Preview->>Runtime: GenerateSample(config, seed, sample_size)
   Runtime-->>Preview: values + warnings
@@ -141,13 +141,48 @@ sequenceDiagram
 
 
 
+### Schema 同步后立即全量重判定流程（A 方案）
+
+```mermaid
+sequenceDiagram
+  participant Sync as SchemaSync(spec-02)
+  participant FFI as FFI
+  participant Recheck as CompatibilityRecheckService
+  participant Schema as CurrentSchemaRepository(spec-02)
+  participant Repo as GeneratorConfigRepository
+  participant Resolve as GeneratorTypeResolver
+  participant Validate as GeneratorConfigValidator
+  participant Risk as CompatibilityRiskReporter
+  Sync->>FFI: ApplySchemaSync(connection_id, diff)
+  FFI->>Sync: 持久化 current schema（成功）
+  Sync-->>FFI: sync_applied
+  FFI->>Recheck: RevalidateAllConfigs(connection_id)
+  Recheck->>Repo: ListConfigsByConnection(connection_id)
+  Repo-->>Recheck: all field configs
+  loop 每个字段配置
+    Recheck->>Schema: GetCurrentSchema(connection_id, table, column)
+    Recheck->>Resolve: ResolveCandidates(field schema)
+    Recheck->>Validate: Validate(config, schema, candidates)
+  end
+  Recheck->>Risk: BuildIncompatibilityReport(results)
+  Risk-->>FFI: report + blocking/non_blocking summary
+  FFI-->>Sync: schema_sync_result + incompatibility_report
+```
+
+约束：
+
+- 触发时机固定为 `ApplySchemaSync` 成功后立即执行，不允许仅依赖惰性读取触发。
+- 重判定范围为该 `connection_id` 下全部字段配置，结果按字段聚合返回。
+- 出现不兼容时必须返回字段定位信息（`connection_id + table + column`）与建议动作，不得静默跳过。
+- 对阻断级风险，需与 `spec-02` 的可信度状态联动，进入 `pending_adjustment` 并阻断后续执行链路。
+
 ## Requirements Traceability
 
 
 | Requirement | Summary     | Components                                                                  | Interfaces                                            | Flows      |
 | ----------- | ----------- | --------------------------------------------------------------------------- | ----------------------------------------------------- | ---------- |
 | 1.x         | 统一接口与注册     | GeneratorRegistry, GeneratorRuntime                                         | `RegisterGenerator`, `ListGeneratorCapabilities`      | 配置与校验、预览生成 |
-| 2.x         | 类型映射与候选选择   | GeneratorTypeResolver, GeneratorRegistry                                    | `GetFieldGeneratorCandidates`                         | 配置与校验      |
+| 2.x         | 类型映射与候选选择   | GeneratorTypeResolver, GeneratorRegistry, CompatibilityRecheckService       | `GetFieldGeneratorCandidates`, `RevalidateAllConfigs` | 配置与校验、Schema 同步后重判定 |
 | 3.x         | 字段配置与校验     | GeneratorConfigService, GeneratorConfigValidator, GeneratorConfigRepository | `SaveFieldGeneratorConfig`, `GetFieldGeneratorConfig` | 配置与校验      |
 | 4.x         | 预览与可复现性     | GeneratorPreviewService, GeneratorRuntime                                   | `PreviewGeneration`                                   | 预览生成       |
 | 5.x         | 边界、安全、契约一致性 | FFI JSON Adapters, GeneratorPreviewService                                  | `PreviewGeneration`, `SaveFieldGeneratorConfig`       | 全流程        |
@@ -162,6 +197,7 @@ sequenceDiagram
 | --------------------------- | -------- | --------------------------- | ------------------ | ----------------------------------- | -------------- |
 | GeneratorRegistry           | Go 领域层   | 管理生成器注册、能力查询与冲突检测           | 1.x, 2.x           | BuiltinGenerators, extensions       | Domain Service |
 | GeneratorTypeResolver       | Go 领域层   | 根据字段 schema 解析候选生成器         | 2.x, 3.x           | Current schema (spec-02), Registry  | Domain Service |
+| CompatibilityRecheckService | Go 应用层   | 在 schema 同步成功后立即全量重判定字段配置兼容性 | 2.x, 3.x, 5.x      | Current schema, Validator, ConfigRepository | Service        |
 | GeneratorConfigValidator    | Go 领域层   | 校验字段级配置合法性                  | 3.x                | TypeResolver, schema metadata       | Domain Service |
 | GeneratorConfigService      | Go 应用层   | 编排配置读写与错误映射                 | 1.x, 2.x, 3.x, 5.x | Validator, ConfigRepository         | Service        |
 | GeneratorPreviewService     | Go 应用层   | 生成样本、汇总预览元数据                | 4.x, 5.x           | Runtime, Registry, ConfigRepository | Service        |
@@ -175,12 +211,10 @@ sequenceDiagram
 
 | Method                         | Request 要点                                                                                                    | Response                                                   | Errors                                    |
 | ------------------------------ | ------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------- | ----------------------------------------- |
-| `RegisterGenerator`            | `generator_id`, `version`, `type_tags[]`, `capability`, `lifecycle_state`                                     | `registered`, `effective_version`                          | `INVALID_ARGUMENT`, `GENERATOR_CONFLICT`  |
-| `EnableGenerator`              | `generator_id`, `version`                                                                                     | `enabled`                                                  | `NOT_FOUND`, `FAILED_PRECONDITION`        |
-| `DisableGenerator`             | `generator_id`, `version`                                                                                     | `disabled`                                                 | `NOT_FOUND`, `FAILED_PRECONDITION`        |
-| `ListGeneratorCapabilities`    | `connection_id?`, `field_type?`                                                                               | `generators[]`                                             | `INVALID_ARGUMENT`                        |
+| `RegisterGenerator`            | `generator_type`, `type_tags[]`, `capability`                                                                | `registered`                                               | `INVALID_ARGUMENT`, `GENERATOR_CONFLICT`  |
+| `ListGeneratorCapabilities`    | `field_type?`                                                                                                 | `generators[]`                                             | `INVALID_ARGUMENT`                        |
 | `GetFieldGeneratorCandidates`  | `connection_id`, `table`, `column`                                                                            | `candidates[]`, `default_generator`                        | `CURRENT_SCHEMA_NOT_FOUND`                |
-| `SaveFieldGeneratorConfig`     | `connection_id`, `table`, `column`, `generator_id`, `generator_opts(params)`, `seed_policy`, `null_policy`, `is_enabled`, `modified_source` | `saved`, `config_version`, `is_enabled`, `modified_source`, `warnings[]` | `INVALID_ARGUMENT`, `FAILED_PRECONDITION` |
+| `SaveFieldGeneratorConfig`     | `connection_id`, `table`, `column`, `generator_type`, `generator_opts(params)`, `seed_policy`, `null_policy`, `is_enabled`, `modified_source` | `saved`, `config_version`, `is_enabled`, `modified_source`, `warnings[]` | `INVALID_ARGUMENT`, `FAILED_PRECONDITION` |
 | `GetFieldGeneratorConfig`      | `connection_id`, `table`, `column`                                                                            | `config`                                                   | `NOT_FOUND`                               |
 | `PreviewGeneration`            | `connection_id`, `scope(field|table)`, `seed?`, `sample_size`                                                | `samples[]`, `metadata`, `warnings[]`                     | `INVALID_ARGUMENT`, `FAILED_PRECONDITION` |
 | `ValidateFieldGeneratorConfig` | `connection_id`, `draft_config`                                                                               | `valid`, `errors[]`                                        | `INVALID_ARGUMENT`                        |
@@ -205,6 +239,10 @@ type Generator interface {
 
 说明：为与 `steering/tech.md` 对齐，领域接口统一使用 `GeneratorType`；FFI JSON 契约层序列化为稳定字符串值（如 `sequence`、`enum`）。
 
+术语对齐：`generator_type` 即 `GeneratorType` 的稳定字符串序列化值；在配置、预览与能力查询契约中统一使用该字符串。
+
+注册语义：`RegisterGenerator` 为进程启动期/模块初始化阶段的内部注册抽象（编译时集成），不提供运行时热插拔动态注册能力。
+
 `GeneratorRuntime` 调用约束：
 
 - `PreviewGeneration(sample_size=1)`：优先调用 `Generate(ctx)`；如生成器仅优化批量路径，可等价路由到 `GenerateBatch(ctx, 1)`。
@@ -226,9 +264,11 @@ type Generator interface {
 
 ### Logical Data Model
 
-- `generator_definitions`（逻辑模型）：生成器 ID、版本、能力声明、参数 schema、生命周期状态。
-- `field_generator_configs`（逻辑模型）：连接/表/字段维度配置，包含 `generator_id`、参数 JSON、空值策略、种子策略、启用状态（`is_enabled`）、版本号、更新时间、修改来源与可选修改人。
+- `registered_generators`（逻辑运行时模型）：进程内已注册生成器清单（`generator_type`、能力声明、参数 schema），用于能力查询，不做数据库持久化。
+- `field_generator_configs`（逻辑模型）：连接/表/字段维度配置，包含 `generator_type`、参数 JSON、空值策略、种子策略、启用状态（`is_enabled`）、配置版本号、更新时间、修改来源与可选修改人。
 - `generation_preview_sessions`（运行时模型）：预览请求上下文、样本结果、警告信息，仅运行时使用，不作为执行历史主数据源。
+
+字段定位语义：FFI/API 入参可使用 `connection_id + table + column` 便于调用侧定位；仓储层在写入 `ldb_column_gen_configs` 前必须先解析为唯一 `column_schema_id`，并以其作为持久化唯一键。
 
 `field_generator_configs` 审计字段约束（固定枚举）：
 
@@ -245,50 +285,32 @@ type Generator interface {
 
 说明：本节用于把逻辑模型映射到 steering 已存在表；完整方言细节最终以 `docs/schema.md` 与 migration 为准。
 
-#### 1) `generator_definitions` -> 新增表 `ldb_generator_definitions`
+#### 1) 生成器注册信息（不落库）
 
-```sql
-CREATE TABLE ldb_generator_definitions (
-  id BIGINT PRIMARY KEY,
-  generator_id VARCHAR(128) NOT NULL,
-  version VARCHAR(32) NOT NULL,
-  type_tags JSON NOT NULL,
-  capability_json JSON NOT NULL,
-  params_schema_json JSON NOT NULL,
-  lifecycle_state VARCHAR(32) NOT NULL, -- enabled/disabled/deprecated
-  deterministic_mode BOOLEAN NOT NULL DEFAULT FALSE,
-  created_at BIGINT NOT NULL,
-  updated_at BIGINT NOT NULL,
-  UNIQUE(generator_id, version)
-);
-```
+`GeneratorRegistry` 采用编译时注册（代码内注册表）。
 
 关键约束：
 
-- `generator_id + version` 必须唯一，用于冲突检测与回滚。
-- `lifecycle_state` 仅允许 `enabled | disabled | deprecated`。
-- `capability_json` 与 `params_schema_json` 必须为合法 JSON。
+- 注册冲突检测在进程内完成：同一 `generator_type` 重复注册时返回 `GENERATOR_CONFLICT`。
+- 能力查询 (`ListGeneratorCapabilities`) 直接读取已注册生成器清单，可按 `field_type` 过滤。
 
 #### 2) `field_generator_configs` -> 对齐 `ldb_column_gen_configs`
 
-`field_generator_configs` 在实现中不新增同名实体，直接对齐并落在 `ldb_column_gen_configs`，保证与 `steering/database-schema.md` 一致。
+`field_generator_configs` 在实现中不新增同名实体，直接对齐并落在 `ldb_column_gen_configs`，保证与 `docs/schema.md` 一致。
 
 ```sql
--- 仅列出 spec-03 必需字段（表可能包含其他既有列）
-ALTER TABLE ldb_column_gen_configs ADD COLUMN generator_id VARCHAR(128) NOT NULL;
-ALTER TABLE ldb_column_gen_configs ADD COLUMN generator_opts JSON NOT NULL DEFAULT '{}';
+-- 仅列出 spec-03 新增字段；既有字段（如 column_schema_id/generator_type/generator_opts/is_enabled）沿用 docs/schema.md
 ALTER TABLE ldb_column_gen_configs ADD COLUMN null_policy VARCHAR(32) NOT NULL DEFAULT 'respect_nullable';
-ALTER TABLE ldb_column_gen_configs ADD COLUMN seed_policy JSON NULL;
-ALTER TABLE ldb_column_gen_configs ADD COLUMN is_enabled BOOLEAN NOT NULL DEFAULT TRUE;
+ALTER TABLE ldb_column_gen_configs ADD COLUMN seed_policy TEXT NULL; -- JSON serialized
 ALTER TABLE ldb_column_gen_configs ADD COLUMN config_version BIGINT NOT NULL DEFAULT 1;
-ALTER TABLE ldb_column_gen_configs ADD COLUMN modified_source VARCHAR(32) NOT NULL;
+ALTER TABLE ldb_column_gen_configs ADD COLUMN modified_source VARCHAR(32) NOT NULL DEFAULT 'ui_manual';
 ALTER TABLE ldb_column_gen_configs ADD COLUMN modified_by VARCHAR(128) NULL;
 ALTER TABLE ldb_column_gen_configs ADD COLUMN updated_at BIGINT NOT NULL;
 ```
 
 关键约束：
 
-- 唯一键：`UNIQUE(connection_id, table_name, column_name)`（若既有表已定义则复用）。
+- 唯一键：`UNIQUE(column_schema_id)`（与 `docs/schema.md` 对齐）。
 - `modified_source` 固定枚举：`ui_manual | automap | schema_sync_migration | import_restore | system_patch`。
 - `null_policy` 建议固定枚举：`respect_nullable | force_non_null | force_null_ratio`。
 - `is_enabled` 默认 `TRUE`；当为 `FALSE` 时，不参与运行时生成调用。
@@ -344,7 +366,8 @@ ALTER TABLE ldb_column_gen_configs ADD COLUMN updated_at BIGINT NOT NULL;
 - 配置参数错误：`INVALID_ARGUMENT`。
 - schema 缺失或失效：`CURRENT_SCHEMA_NOT_FOUND`、`FAILED_PRECONDITION`。
 - 生成器不可用：`UNSUPPORTED_GENERATOR`、`GENERATOR_NOT_REGISTERED`。
-- 生成器注册冲突：`GENERATOR_CONFLICT`（同 ID 版本策略不兼容时拒绝覆盖）。
+- 生成器注册冲突：`GENERATOR_CONFLICT`（同一 `generator_type` 重复注册时拒绝覆盖）。
+- schema 同步后重判定发现不兼容：`FAILED_PRECONDITION`（返回字段级不兼容报告与修复建议）。
 - 枚举值类型不兼容或混合类型：`INVALID_ARGUMENT`（字段级错误路径定位到 `params.values[*]`）。
 - 扩展依赖未就绪：`FAILED_PRECONDITION`（明确上游 spec 提示）。
 - 边界外调用：`OUT_OF_SCOPE_EXECUTION_REQUEST`（提示交由 `spec-04`）。
@@ -352,14 +375,14 @@ ALTER TABLE ldb_column_gen_configs ADD COLUMN updated_at BIGINT NOT NULL;
 ### Monitoring
 
 - 指标：配置校验通过率、预览请求耗时、生成器命中率、错误码分布。
-- 日志脱敏：仅记录连接 ID、表字段标识、生成器 ID、请求 ID，不记录凭据或明文敏感参数。
+- 日志脱敏：仅记录连接 ID、表字段标识、生成器类型、请求 ID，不记录凭据或明文敏感参数。
 
 ## Testing Strategy
 
 - 单元测试：注册冲突检测、类型候选解析、配置校验、固定种子复现。
 - 集成测试：字段配置保存 -> 预览调用 -> 错误映射全链路。
 - 契约测试：FFI JSON 响应结构与错误码稳定性。
-- 跨 spec 联调：与 `spec-02` 验证 schema 变化触发重校验；与 `spec-04` 验证边界错误传播；与 `spec-08/spec-09` 验证扩展点兼容。
+- 跨 spec 联调：与 `spec-02` 验证 `ApplySchemaSync` 成功后立即触发 `RevalidateAllConfigs` 并输出不兼容报告；与 `spec-04` 验证边界错误传播；与 `spec-08/spec-09` 验证扩展点兼容。
 
 ## Supporting References
 

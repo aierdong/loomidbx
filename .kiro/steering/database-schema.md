@@ -1,6 +1,7 @@
 ---
 
 ## name: Database Schema & Connection
+
 description: LoomiDBX 数据库连接与 Schema 扫描的 steering 记忆（当前 schema、内存 Diff、AutoMap、FFI）
 type: reference
 
@@ -40,13 +41,13 @@ Flutter UI  ← FFI(JSON) →  libloomidbx (Go)
 ## 3. 核心表职责（实现时勿混用）
 
 
-| 领域   | 表                                                                               | 要点                                                                                          |
-| ---- | ------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| 连接 | `ldb_connections` | `db_type`、`extra` JSON；密码 **AES-256 落盘**，禁止明文。`extra` 中可维护 `schema_trust_state` 与阻断原因。 |
-| 当前 Schema | `ldb_table_schemas` / `ldb_column_schemas` | 当前生效 schema 的唯一持久化来源；扫描完成后基于兼容性结果决定是否覆盖更新。 |
-| 生成配置 | `ldb_table_gen_configs` / `ldb_column_gen_configs` | 由 Diff 兼容性分析读取；不兼容时要求用户调整后再允许 schema 同步。 |
-| 表间数量 | `ldb_table_relations` | 与「列值从哪来」解耦；`relation_type`：`1:1` / `1:0-1` / `1:n` + `multiplier_`*。 |
-| 运行历史 | `ldb_generation_runs` / `ldb_generation_run_tables` / `ldb_generation_run_logs` | 数据生成执行记录，与扫描任务域解耦。见 `steering/execution-engine.md`。 |
+| 领域        | 表                                                                               | 要点                                                                                     |
+| --------- | ------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| 连接        | `ldb_connections`                                                               | `db_type`、`extra` JSON；密码 **AES-256 落盘**，禁止明文。`extra` 中可维护 `schema_trust_state` 与阻断原因。 |
+| 当前 Schema | `ldb_table_schemas` / `ldb_column_schemas`                                      | 当前生效 schema 的唯一持久化来源；扫描完成后基于兼容性结果决定是否覆盖更新。                                             |
+| 生成配置      | `ldb_table_gen_configs` / `ldb_column_gen_configs`                              | 由 Diff 兼容性分析读取；不兼容时要求用户调整后再允许 schema 同步。                                               |
+| 表间数量      | `ldb_table_relations`                                                           | 与「列值从哪来」解耦；`relation_type`：`1:1` / `1:0-1` / `1:n` + `multiplier_`*。                   |
+| 运行历史      | `ldb_generation_runs` / `ldb_generation_run_tables` / `ldb_generation_run_logs` | 数据生成执行记录，与扫描任务域解耦。见 `steering/execution-engine.md`。                                    |
 
 
 抽象类型枚举：`int` / `string` / `decimal` / `datetime` / `boolean`（映射与 Fallback 以此为准）。
@@ -80,14 +81,16 @@ Flutter UI  ← FFI(JSON) →  libloomidbx (Go)
 
 ### 可信度状态机转换规则（必须遵守）
 
-| 当前状态 | 触发条件 | 下一状态 | 说明 |
-| ---- | ---- | ---- | ---- |
-| `trusted` | 连接配置变更（驱动、DSN、凭据、目标库切换） | `pending_rescan` | 当前 schema 的可信度下降，必须重扫后才能恢复可信。 |
-| `trusted` | 新扫描 Diff 存在阻断级风险 | `pending_adjustment` | 先调整生成器配置，再允许同步与执行。 |
-| `pending_rescan` | 重扫完成且无阻断级风险，并成功同步当前 schema | `trusted` | 重建“当前 schema 单一真相”。 |
-| `pending_rescan` | 重扫完成但仍有阻断级风险 | `pending_adjustment` | 需要用户先处理风险，不可直接恢复可信。 |
-| `pending_adjustment` | 风险已确认处理 + 同步成功 | `trusted` | 解除阻断，恢复执行准入。 |
-| `pending_adjustment` | 用户再次修改连接配置 | `pending_rescan` | 连接变化优先触发重扫要求。 |
+
+| 当前状态                 | 触发条件                       | 下一状态                 | 说明                            |
+| -------------------- | -------------------------- | -------------------- | ----------------------------- |
+| `trusted`            | 连接配置变更（驱动、DSN、凭据、目标库切换）    | `pending_rescan`     | 当前 schema 的可信度下降，必须重扫后才能恢复可信。 |
+| `trusted`            | 新扫描 Diff 存在阻断级风险           | `pending_adjustment` | 先调整生成器配置，再允许同步与执行。            |
+| `pending_rescan`     | 重扫完成且无阻断级风险，并成功同步当前 schema | `trusted`            | 重建“当前 schema 单一真相”。           |
+| `pending_rescan`     | 重扫完成但仍有阻断级风险               | `pending_adjustment` | 需要用户先处理风险，不可直接恢复可信。           |
+| `pending_adjustment` | 风险已确认处理 + 同步成功             | `trusted`            | 解除阻断，恢复执行准入。                  |
+| `pending_adjustment` | 用户再次修改连接配置                 | `pending_rescan`     | 连接变化优先触发重扫要求。                 |
+
 
 补充约束：
 
@@ -127,13 +130,13 @@ Flutter UI  ← FFI(JSON) →  libloomidbx (Go)
 ## 10. 关键决策速查
 
 
-| 主题 | 方案 |
-| ---- | ---- |
-| 元数据多后端 | 环境变量 + `StorageDriver` + Migration |
+| 主题         | 方案                                                               |
+| ---------- | ---------------------------------------------------------------- |
+| 元数据多后端     | 环境变量 + `StorageDriver` + Migration                               |
 | Schema 持久化 | 仅维护当前 schema（`ldb_table_schemas`/`ldb_column_schemas`），不保留扫描快照历史 |
-| 同步策略 | 无阻断风险可直接覆盖；阻断风险必须先调整生成器 |
-| 可信度状态 | `trusted` / `pending_rescan` / `pending_adjustment` |
-| FFI | JSON 优先于手写 C 结构体 |
+| 同步策略       | 无阻断风险可直接覆盖；阻断风险必须先调整生成器                                          |
+| 可信度状态      | `trusted` / `pending_rescan` / `pending_adjustment`              |
+| FFI        | JSON 优先于手写 C 结构体                                                 |
 
 
 ---

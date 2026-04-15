@@ -20,8 +20,8 @@
 #### Acceptance Criteria
 
 1. The LoomiDBX Generator Framework shall 定义统一 `Generator` 抽象（至少包括元信息、输入上下文、输出值与可分类错误）。
-2. The LoomiDBX Generator Framework shall 提供注册中心能力，支持按生成器 ID、版本与类型标签注册、查询、启停与冲突检测。
-3. When 同一生成器 ID 被重复注册且版本策略不兼容, the LoomiDBX Generator Framework shall 返回稳定错误并拒绝覆盖有效注册项。
+2. The LoomiDBX Generator Framework shall 提供注册中心能力，支持按 `generator_type` 与类型标签注册、查询与冲突检测。
+3. When 同一 `generator_type` 被重复注册, the LoomiDBX Generator Framework shall 返回稳定错误并拒绝覆盖有效注册项。
 4. The LoomiDBX Generator Framework shall 支持通过能力声明（例如支持字段类型、是否需要外部 feed、是否可确定性复现）进行筛选，供 UI/FFI 与执行层消费。
 
 ### Requirement 2: 类型生成器与字段类型映射
@@ -42,10 +42,10 @@
 
 #### Acceptance Criteria
 
-1. The LoomiDBX Generator Framework shall 提供字段级配置模型（至少包含字段标识、生成器 ID、参数、空值策略、种子策略与启用状态）。
+1. The LoomiDBX Generator Framework shall 提供字段级配置模型（至少包含字段标识、`generator_type`、参数、空值策略、种子策略与启用状态）。
 2. When 用户提交字段配置, the LoomiDBX Generator Framework shall 执行结构化校验（必填参数、参数类型、取值范围、与字段 schema 兼容性）。
 3. If 校验失败, the LoomiDBX Generator Framework shall 返回字段级错误清单，包含错误码、错误路径与修复建议。
-4. The LoomiDBX Generator Framework shall 支持按连接/表维度查询与更新字段配置，并保留最小必要审计信息（修改时间、修改来源）。
+4. The LoomiDBX Generator Framework shall 支持按连接/表维度查询与更新字段配置；请求侧可使用 `connection_id + table + column` 定位字段，持久化侧必须解析并落在 `column_schema_id` 唯一键上；同时保留最小必要审计信息（修改时间、修改来源）。
 5. The LoomiDBX Generator Framework shall 对 `modified_source` 采用固定枚举并进行校验，非法取值必须拒绝保存并返回字段级 `INVALID_ARGUMENT` 错误。
 
 ### Requirement 4: 预览能力与可复现性
@@ -56,7 +56,7 @@
 
 1. The LoomiDBX Generator Framework shall 提供预览接口，支持单字段与单表范围的样本生成，不触发真实写入。
 2. When 预览请求包含固定种子, the LoomiDBX Generator Framework shall 在同一配置与输入上下文下返回可复现结果。
-3. The LoomiDBX Generator Framework shall 在预览响应中附带元数据（生成器 ID、参数摘要、是否确定性、警告信息）。
+3. The LoomiDBX Generator Framework shall 在预览响应中附带元数据（`generator_type`、参数摘要、是否确定性、警告信息）。
 4. If 生成器依赖外部 feed 或计算表达式但依赖未就绪, the LoomiDBX Generator Framework shall 返回 `FAILED_PRECONDITION` 类错误并指示对应上游依赖。
 
 ### Requirement 5: 边界控制、安全与契约一致性
