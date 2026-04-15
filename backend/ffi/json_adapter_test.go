@@ -281,6 +281,11 @@ func newTestStore(t *testing.T) *storage.ConnectionStore {
 	if err != nil {
 		t.Fatalf("create store failed: %v", err)
 	}
+	t.Cleanup(func() {
+		if closeErr := store.Close(); closeErr != nil {
+			t.Fatalf("close store failed: %v", closeErr)
+		}
+	})
 	return store
 }
 

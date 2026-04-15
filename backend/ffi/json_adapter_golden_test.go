@@ -347,5 +347,5 @@ func TestGolden_ErrorResponseNoSensitiveLeak(t *testing.T) {
 // ===== 辅助函数 =====
 
 func newGoldenAdapter(t *testing.T) (*ffi.FFIAdapter, *storage.ConnectionStore) {
-	return newAdapter(t) // 使用已有的辅助函数
+	return newAdapter(t) // 复用 newAdapter 的 t.Cleanup 关闭逻辑
 }

@@ -29,6 +29,9 @@ const (
 	// CodeAuthFailed 表示认证失败（用户名/密码错误）。
 	CodeAuthFailed = "AUTH_FAILED"
 
+	// CodePermissionDenied 表示上游数据库权限不足（无访问系统表/元数据权限等）。
+	CodePermissionDenied = "PERMISSION_DENIED"
+
 	// CodeTLSError 表示 TLS/SSL 协商失败或证书问题。
 	CodeTLSError = "TLS_ERROR"
 

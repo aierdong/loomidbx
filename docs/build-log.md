@@ -758,3 +758,363 @@ _ 下一批前置条件：<满足/不满足 + 原因>
 
   所有测试通过（163.490s），Requirement 3.2 现已完整实现。
 
+
+
+---
+
+请按照当前 spec: spec-02-schema-scan-and-diff  的设计，将 tasks.md 中的任务拆成可执行任务批次给我，我将手动逐一执行每个批次。当前我使用的“逐批执行提示词模板”如下，可供参考：
+
+\---
+
+你现在执行 spec-01 的实现批次 {批次编号}，任务范围仅限：{任务号列表}。
+
+注意：以最新 design.md 为准，覆盖 tasks.md 中旧表述。
+
+必须实现/重点验收：
+
+\- 1
+
+\- 2
+
+\- 3
+
+\- ...
+
+完成后必须按以下格式输出：
+
+\- 将已完成任务在 tasks.md 中标记完成
+
+\- 已完成任务：<逐条列出任务号>
+
+\- 变更文件：<路径列表>
+
+\- 验证结果：<测试命令与结果摘要>
+
+\- 未解决问题/风险：<如无写“无”>
+
+\- 下一批前置条件：<满足/不满足 + 原因>
+
+
+
+---
+
+下面按 `design.md` 为最高优先级（覆盖 `tasks.md` 里与架构/契约不一致的旧表述）把 `tasks.md` 拆成 13 个可手动执行批次。划分原则：先持久化与领域模型 → 扫描读数与任务上下文 → Diff → 信任态与风险 → 同步事务 → FFI → UI/闸门/边界 → 测试与联调。
+
+------
+
+## 全局对齐 `design.md` 的要点（各批都应自检）
+
+- 单一真相：当前 schema 只落在 `ldb_table_schemas` / `ldb_column_schemas`，不新增扫描/快照/审计表；扫描 `task_id`、进度、`preview` 仅运行时内存。
+- 组件边界：`SchemaInspector` 只读目标库并标准化；`CurrentSchemaRepository` 只做当前 schema 覆盖；`SchemaScanService` 编排；`SchemaTrustGate` 管 `trusted` / `pending_rescan` / `pending_adjustment`；扫描子系统不执行生成或业务写入（与 5.2 一致）。
+- 错误与脱敏：稳定错误码（如 `BLOCKING_RISK_UNRESOLVED`、`CURRENT_SCHEMA_NOT_FOUND`、`DIFF_SCOPE_MISMATCH` 等）；日志/错误不含凭据与敏感参数。
+- 与 spec-03：`GeneratorCompatibilityAnalyzer` 依赖「生成器配置存储」；若本仓库尚未有 spec-03 实现，本阶段可用 明确 stub/接口 满足 4.1/4.4 契约，但批次说明里会标出。
+
+------
+
+## 批次总览
+
+| 批次 | 任务号        | 依赖（上一批应完成）                                         |
+| :--- | :------------ | :----------------------------------------------------------- |
+| B01  | 1, 1.1        | 无（或仅 spec-01 连接模型已可用）                            |
+| B02  | 2.1           | B01                                                          |
+| B03  | 2.3           | B01（任务上下文不落库）；与 B02 可并行，但编排层常在 B04 才接满 |
+| B04  | 2.2           | B02（单表/范围读数）；建议 B03 已完成或同步进行              |
+| B05  | 3.1, 3.2      | B01 + B02（内存图 + 当前 schema 形状）                       |
+| B06  | 2.4, 4.4      | B01（连接侧 trust 字段）；与 B05 衔接（Diff 结果驱动迁移时可在 B07 再收紧） |
+| B07  | 4.1           | B05；生成器配置可读（或 stub）                               |
+| B08  | 1.2           | B01 + B05 + B06 + B07（同步闸门语义才完整）                  |
+| B09  | 5.1           | B01～B08 中已实现的能力需能经 FFI 暴露；可先做最小闭环再补全 |
+| B10  | 4.2, 4.3, 5.2 | B09（或至少 Preview/Apply 的 JSON 已定型）                   |
+| B11  | 6.1           | B05～B08 核心逻辑已落地                                      |
+| B12  | 6.2           | B09～B10 契约稳定后更合适                                    |
+| B13  | 6.3           | B12；依赖 spec-03/04/05/07 可用程度                          |
+
+------
+
+## 各批「逐批执行提示词」可直接粘贴内容
+
+把下面 `{批次编号}`、`{任务号列表}`、`必须实现/重点验收` 整块复制到你的模板即可（spec-01 → spec-02）。
+
+------
+
+### B01 — 任务：`1`, `1.1`
+
+> /spec-impl  你现在执行 spec-02 的实现批次 B01，任务范围仅限：1, 1.1。
+>
+> 注意：以最新 `design.md` 为准，覆盖 `tasks.md` 中旧表述。
+>
+> 
+>
+> 必须实现/重点验收：
+>
+> 
+>
+> \- 当前 schema 仅使用 `ldb_table_schemas` / `ldb_column_schemas`，语义为按连接维度覆盖更新，不新增扫描/快照/审计表。
+>
+> \- 在 `ldb_connections.extra`（或等价字段） 持久化 `schema_trust_state`、最近阻断原因，以及设计要求的扫描/同步元数据（如最后扫描时间、最后同步时间等，与 `tasks.md` 1.1 一致）。
+>
+> \- 领域类型与仓储接口与 `CurrentSchemaRepository` / `SchemaTrustGate` 在 `design.md` 中的职责对齐（读模型可先于写事务在 B08 完成）。
+>
+> 
+>
+> 完成后必须按以下格式输出：
+>
+> 
+>
+> \- 将已完成任务在 tasks.md 中标记完成
+>
+> \- 已完成任务：<逐条列出任务号>
+>
+> \- 变更文件：<路径列表>
+>
+> \- 验证结果：<测试命令与结果摘要>
+>
+> \- 未解决问题/风险：<如无写“无”>
+>
+> \- 下一批前置条件：<满足/不满足 + 原因>
+
+## 已完成任务
+
+已在 `tasks.md` 中将 1、1.1 标为完成。
+
+- 1：`SchemaScanRuntimeContext`、扫描任务状态枚举、`CurrentSchemaBundle` / `TableSchemaPersisted` / `ColumnSchemaPersisted` 等当前 schema 读模型；`CurrentSchemaRepository`、`SchemaTrustGate` 接口与 `TrustStateView` / `TrustStateUpdateInput` 与 `design.md` 职责对齐（仅接口与类型，写事务实现留待后续批次）。
+- 1.1：`ldb_table_schemas` + 新增迁移 `ldb_column_schemas`（不增加扫描/快照/审计表）；删除连接时先删列再删表；在 `ldb_connections.extra` 中通过 `schema_trust_state`、`schema_last_blocking_reason`、`last_schema_scan_unix`、`last_schema_sync_unix` 持久化可信度与扫描/同步元数据；`MergeConnectionExtraSchemaMeta` / `ParseConnectionSchemaMeta` 与 `PatchConnectionSchemaExtra` 合并写回。
+
+## 变更文件
+
+- `.kiro/specs/spec-02-schema-scan-and-diff/tasks.md`
+- `backend/schema/doc.go`
+- `backend/schema/trust_state.go`
+- `backend/schema/trust_state_test.go`
+- `backend/schema/connection_extra_meta.go`
+- `backend/schema/connection_extra_meta_test.go`
+- `backend/schema/scan_runtime.go`
+- `backend/schema/current_schema_repository.go`
+- `backend/schema/schema_trust_gate.go`
+- `backend/storage/connection_store.go`
+- `backend/storage/connection_store_test.go`
+
+## 验证结果
+
+- 命令：`go test ./backend/schema/... ./backend/storage/... -count=1`
+- 结果：全部通过（schema、storage）。
+
+说明：全量 `go test ./backend/...` 在本机 ffi 包偶发失败（SQLite 占用 `meta.db` 导致 TempDir 清理报错），属环境/句柄问题，与本次 diff 无直接关系。
+
+## 未解决问题 / 风险
+
+- 无（功能范围内）。若需 CI 全绿，可在 Windows 上为 FFI 测试增加显式 `Close`/`SetMaxOpenConns(1)` 等，避免句柄占用。
+
+## 下一批前置条件
+
+- 满足：extra 契约、`PatchConnectionSchemaExtra`、列/表 DDL、级联删除与领域接口已就绪。
+- 原因：下一批可实现 `CurrentSchemaRepository` 的 SQL 加载/事务覆盖写入，以及 `SchemaTrustGate` 的具体状态机与 `UpdateTrustState` 持久化（可与 B08 读模型衔接）
+
+
+------
+
+### B02 — 任务：`2.1`
+
+> 你现在执行 spec-02 的实现批次 B02，任务范围仅限：2.1。
+> 注意：以最新 `design.md` 为准。
+>
+> 必须实现/重点验收：
+>
+> - `SchemaInspector`：全库（或给定范围）按确定性顺序读取表、列、主键、唯一约束、外键，输出统一内存 schema 图。
+> - 多方言抽象：同一套内存结构；错误映射到设计中的上游类错误（`UPSTREAM_UNAVAILABLE` / `AUTH_FAILED` / `PERMISSION_DENIED` 等），不泄漏敏感信息。
+>
+> 完成后必须按以下格式输出：
+>
+> - 将已完成任务在 tasks.md 中标记完成
+>
+> - 已完成任务：<逐条列出任务号>
+>
+> - 变更文件：<路径列表>
+>
+> - 验证结果：<测试命令与结果摘要>
+>
+> - 未解决问题/风险：<如无写“无”>
+>
+> - 下一批前置条件：<满足/不满足 + 原因>
+
+### 已完成任务（tasks.md）
+
+- 已将 `2.1` 勾选完成：`.kiro/specs/spec-02-schema-scan-and-diff/tasks.md`
+
+### 已完成任务（逐条）
+
+- 2.1
+
+### 变更文件（路径列表）
+
+- `.kiro/specs/spec-02-schema-scan-and-diff/tasks.md`
+- `backend/schema/schema_graph.go`
+- `backend/schema/schema_inspector.go`
+- `backend/schema/abstract_type.go`
+- `backend/schema/upstream_error.go`
+- `backend/schema/schema_inspector_sqlite.go`
+- `backend/schema/schema_inspector_sqlite_test.go`
+- `backend/schema/schema_inspector_sql.go`
+- `backend/schema/schema_inspector_sql_mysql.go`
+- `backend/schema/schema_inspector_sql_postgres.go`
+- `backend/schema/schema_inspector_sql_test.go`
+- `backend/app/connection_types.go`
+
+### 验证结果（测试命令与摘要）
+
+- `go test ./backend/schema -count=1`：通过
+- `go test ./...`：未全绿（`backend/ffi` 在 Windows 上出现 `TempDir RemoveAll cleanup` 文件占用失败；本次已确认 import cycle 已消除）
+
+### 未解决问题/风险
+
+- 全仓测试在 Windows 上仍可能因 `backend/ffi` 的 SQLite 文件句柄释放问题失败（与本次 2.1 核心实现无直接耦合）。
+- MySQL/Postgres inspector 目前以结构与错误映射单测为主；真实实例集成验证更适合放到后续 6.2。
+
+### 下一批前置条件
+
+- 满足（有条件）：2.1 已落地并勾选完成，可进入下一批；但建议先修复 `backend/ffi` 的 Windows 文件占用问题以恢复 `go test ./...` 基线稳定性。
+
+------
+
+### B03 — 任务：`2.3`
+
+你现在执行 spec-02 的实现批次 B03，任务范围仅限：2.3。
+注意：以最新 `design.md` 为准。
+
+必须实现/重点验收：
+
+- 扫描任务上下文 `task_id`、`status`、`progress`、`preview` 仅运行时内存，不落独立历史表。
+- 状态机 `running` / `completed` / `failed` / `cancelled` 与查询接口（对应逻辑 API：`GetSchemaScanStatus`）一致；错误分类且不含敏感字段。
+
+------
+
+### B04 — 任务：`2.2`
+
+你现在执行 spec-02 的实现批次 B04，任务范围仅限：2.2。
+注意：以最新 `design.md` 为准。
+
+必须实现/重点验收：
+
+- 单表扫描与 按受影响表重扫（`StartSchemaRescan` 的 `strategy` 等）的范围校验、触发原因记录、返回 `task_id` + 进度状态。
+- 与 B02/B03 的编排衔接：`StartSchemaScan(connection_id, scope, table_names, trigger)` 行为符合 `design.md` API Contract。
+
+------
+
+### B05 — 任务：`3.1`, `3.2`
+
+你现在执行 spec-02 的实现批次 B05，任务范围仅限：3.1, 3.2。
+注意：以最新 `design.md` 为准。
+
+必须实现/重点验收：
+
+- `SchemaDiffEngine`：`Compare(current, in-memory)` → 新增/删除/修改三级分类 + 列级详情（类型、可空、默认值、约束、索引等按 `tasks.md` 规则）。
+- 首扫 / 当前 schema 缺失、损坏、范围不兼容：走 `CURRENT_SCHEMA_NOT_FOUND` / `DIFF_SCOPE_MISMATCH` 等设计错误策略；首扫不得返回「上下文缺失的半成品 Diff」；与 `PreviewSchemaDiff` 前置条件一致。
+
+------
+
+### B06 — 任务：`2.4`, `4.4`
+
+你现在执行 spec-02 的实现批次 B06，任务范围仅限：2.4, 4.4。
+注意：以最新 `design.md` 为准。
+
+必须实现/重点验收：
+
+- `SchemaTrustGate`：`trusted` / `pending_rescan` / `pending_adjustment` 及 `design.md` 状态迁移表（连接变更优先 `pending_rescan`；阻断风险 → `pending_adjustment`；仅 `trusted` 可放行下游执行——与 4.3 衔接）。
+- `GetGeneratorCompatibilityRisks`：无生成器配置时 `mode=no_generator_config` + 空 `risks`，非错误（与 `design.md` Error Handling 一致）。
+
+------
+
+### B07 — 任务：`4.1`
+
+你现在执行 spec-02 的实现批次 B07，任务范围仅限：4.1。
+注意：以最新 `design.md` 为准。
+
+必须实现/重点验收：
+
+- `GeneratorCompatibilityAnalyzer`：基于 Diff + 生成器配置输出 对象、原因、建议动作；至少覆盖 字段删除、重命名/缺失、类型不兼容 等阻断级风险。
+- 若 spec-03 配置存储未就绪：接口清晰 + stub 行为可测，且不得与 4.4 的 `no_generator_config` 语义冲突。
+
+------
+
+### B08 — 任务：`1.2`
+
+你现在执行 spec-02 的实现批次 B08，任务范围仅限：1.2。
+注意：以最新 `design.md` 为准。
+
+必须实现/重点验收：
+
+- `ApplySchemaSync`：`TransactionalReplaceCurrentSchema`；无阻断风险可覆盖；有阻断且未在 `ack_risk_ids`/闸门规则中处理 → `BLOCKING_RISK_UNRESOLVED`，且 `trust_state=pending_adjustment`（与序列图一致）。
+- 覆盖 写入失败、并发冲突、阻断未处理 的拒绝路径；日志仅 连接 ID / 任务 ID 维度。
+
+------
+
+### B09 — 任务：`5.1`
+
+你现在执行 spec-02 的实现批次 B09，任务范围仅限：5.1。
+注意：以最新 `design.md` 为准。
+
+必须实现/重点验收：
+
+- FFI/JSON：`StartSchemaScan`、`GetSchemaScanStatus`、`PreviewSchemaDiff`、`GetGeneratorCompatibilityRisks`、`ApplySchemaSync`、`StartSchemaRescan`、`GetCurrentSchema`、`GetSchemaTrustState` 与 `ok/data/error` + 错误码映射一致；响应 脱敏（不返回连接敏感信息）。
+
+------
+
+### B10 — 任务：`4.2`, `4.3`, `5.2`
+
+你现在执行 spec-02 的实现批次 B10，任务范围仅限：4.2, 4.3, 5.2。
+注意：以最新 `design.md` 为准。
+
+必须实现/重点验收：
+
+- UI 契约：必须能展示 Diff + 风险；动作：查看 Diff/风险、执行同步；无阻断可直接同步，有阻断须先调整（与 `design.md` 流程一致）。
+- 4.3：阻断级风险未处理时 禁止进入后续生成执行；稳定错误码供 spec-03/spec-04 消费。
+- 5.2：扫描子系统 拒绝数据生成/写入执行类请求，返回明确 范围外 错误；补充 边界契约测试。
+
+------
+
+### B11 — 任务：`6.1`
+
+你现在执行 spec-02 的实现批次 B11，任务范围仅限：6.1。
+注意：以最新 `design.md` 为准。
+
+必须实现/重点验收：
+
+- 单元测试覆盖：标准化、Diff 分类、风险识别、同步闸门、可信度状态机、错误码映射（对应 `tasks.md` 6.1）。
+
+------
+
+### B12 — 任务：`6.2`
+
+你现在执行 spec-02 的实现批次 B12，任务范围仅限：6.2。
+注意：以最新 `design.md` 为准。
+
+必须实现/重点验收：
+
+- 集成测试：全库扫描、单表重扫、内存对比、UI Diff 呈现契约、自动/手动同步 全链路；至少两种方言样例。
+
+------
+
+### B13 — 任务：`6.3`
+
+你现在执行 spec-02 的实现批次 B13，任务范围仅限：6.3。
+注意：以最新 `design.md` 为准。
+
+必须实现/重点验收：
+
+- 与 spec-03 / spec-04 / spec-05 / spec-07 的联调检查项按 `tasks.md` 6.3 所列逐项记录结果（阻塞项标风险）。
+
+------
+
+## 你现有「完成后输出格式」
+
+每批结束后仍按你给的格式输出即可；把 spec-01 改成 spec-02，任务号列表 改成该批的编号集合。
+
+------
+
+## 可选压缩方案（若你希望更少批次）
+
+- 合并 B02+B03+B04 → 一批「2.1–2.3」：工作量大，适合连续时间块。
+- 合并 B11+B12：先单测再集成，仍建议 B13 单独（依赖外部 spec）。
+
+若你希望改成 8～10 个大批次（例如合并测试），可以说一下你每次能投入的大致时长，我可以再压一版「大块」划分。
+

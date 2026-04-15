@@ -1,8 +1,12 @@
 package storage
 
 import (
+	"context"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"loomidbx/backend/schema"
 )
 
 // TestBuildConnectionUpsertSQLByBackend 验证不同存储后端生成不同 upsert 方言。
@@ -117,6 +121,7 @@ func TestQueryBuildersUseBackendPlaceholders(t *testing.T) {
 			store := &ConnectionStore{backend: tt.backend}
 			sqls := []string{
 				store.buildGetConnectionByIDSQL(),
+				store.buildDeleteColumnSchemasByConnectionIDSQL(),
 				store.buildDeleteTableSchemasByConnectionIDSQL(),
 				store.buildDeleteConnectionByIDSQL(),
 				store.buildInsertDummyTableSchemaSQL(),
@@ -147,6 +152,8 @@ func TestMigrationStatementsUseBackendTypes(t *testing.T) {
 				"extra TEXT",
 				"created_at INTEGER",
 				"scan_version INTEGER NOT NULL DEFAULT 1",
+				"ldb_column_schemas",
+				"abstract_type",
 			},
 		},
 		{
@@ -158,6 +165,8 @@ func TestMigrationStatementsUseBackendTypes(t *testing.T) {
 				"extra JSON",
 				"created_at BIGINT",
 				"scan_version INT NOT NULL DEFAULT 1",
+				"ldb_column_schemas",
+				"abstract_type",
 			},
 		},
 		{
@@ -169,6 +178,8 @@ func TestMigrationStatementsUseBackendTypes(t *testing.T) {
 				"extra JSONB",
 				"created_at BIGINT",
 				"scan_version INTEGER NOT NULL DEFAULT 1",
+				"ldb_column_schemas",
+				"abstract_type",
 			},
 		},
 	}
@@ -187,5 +198,91 @@ func TestMigrationStatementsUseBackendTypes(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestPatchConnectionSchemaExtra_preservesExtraKeys 验证合并 schema 元数据不破坏 extra 中其它键。
+func TestPatchConnectionSchemaExtra_preservesExtraKeys(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "meta-patch.db")
+	store, err := NewConnectionStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	id := "c-patch-1"
+	if err := store.UpsertConnection(ctx, ConnectionRecord{
+		ID: id, Name: "n", DBType: "sqlite", Extra: `{"charset":"utf8"}`,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	ts := schema.SchemaTrustPendingAdjustment
+	reason := "BLOCKING_RISK_UNRESOLVED"
+	if err := store.PatchConnectionSchemaExtra(ctx, id, schema.ConnectionSchemaMetaPatch{
+		TrustState: &ts, LastBlockingReason: &reason,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	rec, err := store.GetConnectionByID(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	meta, err := schema.ParseConnectionSchemaMeta(rec.Extra)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if meta.SchemaTrustState != ts {
+		t.Fatalf("trust: got %q", meta.SchemaTrustState)
+	}
+	if meta.SchemaLastBlockingReason != reason {
+		t.Fatalf("reason: got %q", meta.SchemaLastBlockingReason)
+	}
+	if !strings.Contains(rec.Extra, "charset") {
+		t.Fatalf("lost unrelated keys: %s", rec.Extra)
+	}
+}
+
+// TestDeleteConnectionCascade_dropsColumnSchemas 验证删除连接时先清理列级当前 schema。
+func TestDeleteConnectionCascade_dropsColumnSchemas(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "meta-cascade.db")
+	store, err := NewConnectionStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	cid := "conn-cascade"
+	if err := store.UpsertConnection(ctx, ConnectionRecord{ID: cid, Name: "n", DBType: "sqlite"}); err != nil {
+		t.Fatal(err)
+	}
+	tid := "tbl1"
+	if err := store.InsertDummyTableSchema(ctx, tid, cid, "t1"); err != nil {
+		t.Fatal(err)
+	}
+	_, err = store.db.ExecContext(ctx, `
+		INSERT INTO ldb_column_schemas (id, table_schema_id, column_name, ordinal_pos, data_type, abstract_type,
+			is_primary_key, is_nullable, is_unique, is_auto_increment, extra)
+		VALUES ('col1', ?, 'c1', 1, 'INT', 'int', 1, 0, 0, 0, '{}')
+	`, tid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var colCount int
+	if err := store.db.QueryRowContext(ctx, `SELECT COUNT(1) FROM ldb_column_schemas`).Scan(&colCount); err != nil {
+		t.Fatal(err)
+	}
+	if colCount != 1 {
+		t.Fatalf("colCount %d", colCount)
+	}
+	if err := store.DeleteConnectionCascade(ctx, cid, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.db.QueryRowContext(ctx, `SELECT COUNT(1) FROM ldb_column_schemas`).Scan(&colCount); err != nil {
+		t.Fatal(err)
+	}
+	if colCount != 0 {
+		t.Fatalf("want 0 column rows, got %d", colCount)
 	}
 }

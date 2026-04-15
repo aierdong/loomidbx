@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"loomidbx/backend/schema"
+
 	_ "modernc.org/sqlite"
 )
 
@@ -69,7 +71,7 @@ type ConnectionRecord struct {
 type ConnectionStore struct {
 	// db 是元数据库连接句柄。
 	db *sql.DB
-	
+
 	// backend 是当前元数据库后端类型（sqlite/mysql/postgres）。
 	backend string
 }
@@ -164,9 +166,9 @@ func (s *ConnectionStore) UpsertConnection(ctx context.Context, rec ConnectionRe
 	}
 	rec.UpdatedAt = now
 	upsertSQL := s.buildConnectionUpsertSQL()
-	_, err := s.db.ExecContext(ctx, upsertSQL, 
-		rec.ID, rec.Name, rec.DBType, rec.Host, rec.Port, 
-		rec.Username, rec.Password, rec.Database, rec.Extra, 
+	_, err := s.db.ExecContext(ctx, upsertSQL,
+		rec.ID, rec.Name, rec.DBType, rec.Host, rec.Port,
+		rec.Username, rec.Password, rec.Database, rec.Extra,
 		rec.CreatedAt, rec.UpdatedAt)
 	if err != nil {
 		return fmt.Errorf("persist connection: %w", err)
@@ -260,8 +262,8 @@ func (s *ConnectionStore) buildConnectionUpsertSQL() string {
 func (s *ConnectionStore) GetConnectionByID(ctx context.Context, id string) (*ConnectionRecord, error) {
 	row := s.db.QueryRowContext(ctx, s.buildGetConnectionByIDSQL(), id)
 	var rec ConnectionRecord
-	if err := row.Scan(&rec.ID, &rec.Name, &rec.DBType, &rec.Host, &rec.Port, 
-		&rec.Username, &rec.Password, &rec.Database, &rec.Extra, 
+	if err := row.Scan(&rec.ID, &rec.Name, &rec.DBType, &rec.Host, &rec.Port,
+		&rec.Username, &rec.Password, &rec.Database, &rec.Extra,
 		&rec.CreatedAt, &rec.UpdatedAt); err != nil {
 		return nil, err
 	}
@@ -289,8 +291,8 @@ func (s *ConnectionStore) ListConnections(ctx context.Context) ([]ConnectionReco
 	out := make([]ConnectionRecord, 0)
 	for rows.Next() {
 		var rec ConnectionRecord
-		if err := rows.Scan(&rec.ID, &rec.Name, &rec.DBType, &rec.Host, &rec.Port, 
-			&rec.Username, &rec.Password, &rec.Database, &rec.Extra, 
+		if err := rows.Scan(&rec.ID, &rec.Name, &rec.DBType, &rec.Host, &rec.Port,
+			&rec.Username, &rec.Password, &rec.Database, &rec.Extra,
 			&rec.CreatedAt, &rec.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("scan connection: %w", err)
 		}
@@ -300,6 +302,31 @@ func (s *ConnectionStore) ListConnections(ctx context.Context) ([]ConnectionReco
 		return nil, fmt.Errorf("iterate connections: %w", err)
 	}
 	return out, nil
+}
+
+// PatchConnectionSchemaExtra 合并 schema 子域字段到 ldb_connections.extra（保留无关键）。
+//
+// 输入：
+// - ctx: 请求上下文。
+// - connectionID: 连接 ID。
+// - patch: 局部更新；空 patch 不写库。
+//
+// 输出：
+// - error: 连接不存在或合并/写入失败时返回错误。
+func (s *ConnectionStore) PatchConnectionSchemaExtra(ctx context.Context, connectionID string, patch schema.ConnectionSchemaMetaPatch) error {
+	if patch.IsEmpty() {
+		return nil
+	}
+	rec, err := s.GetConnectionByID(ctx, connectionID)
+	if err != nil {
+		return err
+	}
+	merged, err := schema.MergeConnectionExtraSchemaMeta(rec.Extra, patch)
+	if err != nil {
+		return fmt.Errorf("merge connection extra: %w", err)
+	}
+	rec.Extra = merged
+	return s.UpsertConnection(ctx, *rec)
 }
 
 // DeleteCredentialReferenceFunc 定义删除流程中的外部凭据清理回调。
@@ -336,7 +363,10 @@ func (s *ConnectionStore) DeleteConnectionCascade(ctx context.Context, id string
 		return fmt.Errorf("delete credential refs: %w", err)
 	}
 
-	// 先删除依赖连接的元数据，避免孤儿记录。
+	// 先删除列级当前 schema，再删除表级当前 schema，避免孤儿记录。
+	if _, err := tx.ExecContext(ctx, s.buildDeleteColumnSchemasByConnectionIDSQL(), id); err != nil {
+		return fmt.Errorf("cascade delete column schemas: %w", err)
+	}
 	if _, err := tx.ExecContext(ctx, s.buildDeleteTableSchemasByConnectionIDSQL(), id); err != nil {
 		return fmt.Errorf("cascade delete table schemas: %w", err)
 	}
@@ -454,6 +484,14 @@ func (s *ConnectionStore) buildDeleteTableSchemasByConnectionIDSQL() string {
 	return fmt.Sprintf(`DELETE FROM ldb_table_schemas WHERE connection_id = %s`, s.placeholder(1))
 }
 
+// buildDeleteColumnSchemasByConnectionIDSQL 构建按连接删除列 schema 行的 SQL（先于表行删除，满足外键顺序）。
+func (s *ConnectionStore) buildDeleteColumnSchemasByConnectionIDSQL() string {
+	return fmt.Sprintf(`
+		DELETE FROM ldb_column_schemas WHERE table_schema_id IN (
+			SELECT id FROM ldb_table_schemas WHERE connection_id = %s
+		)`, s.placeholder(1))
+}
+
 // buildDeleteConnectionByIDSQL 构建按 ID 删除连接记录的 SQL。
 func (s *ConnectionStore) buildDeleteConnectionByIDSQL() string {
 	return fmt.Sprintf(`DELETE FROM ldb_connections WHERE id = %s`, s.placeholder(1))
@@ -523,8 +561,8 @@ func (s *ConnectionStore) buildMigrationStatements() []string {
 			extra %s,
 			created_at %s,
 			updated_at %s
-		)`, types.IDType, types.NameType, types.DBType, types.HostType, types.PortType, 
-			types.UsernameType, types.PasswordType, types.DatabaseType, types.JSONType, 
+		)`, types.IDType, types.NameType, types.DBType, types.HostType, types.PortType,
+			types.UsernameType, types.PasswordType, types.DatabaseType, types.JSONType,
 			types.TimestampType, types.TimestampType),
 		fmt.Sprintf(`CREATE TABLE IF NOT EXISTS ldb_table_schemas (
 			id %s PRIMARY KEY,
@@ -536,8 +574,28 @@ func (s *ConnectionStore) buildMigrationStatements() []string {
 			scan_version %s NOT NULL DEFAULT 1,
 			scanned_at %s NOT NULL,
 			FOREIGN KEY (connection_id) REFERENCES ldb_connections(id)
-		)`, types.IDType, types.IDType, types.NameType, types.NameType, types.NameType, 
+		)`, types.IDType, types.IDType, types.NameType, types.NameType, types.NameType,
 			types.CommentType, types.CounterType, types.TimestampType),
+		fmt.Sprintf(`CREATE TABLE IF NOT EXISTS ldb_column_schemas (
+			id %s PRIMARY KEY,
+			table_schema_id %s NOT NULL,
+			column_name %s NOT NULL,
+			ordinal_pos %s,
+			data_type %s NOT NULL,
+			abstract_type %s NOT NULL,
+			is_primary_key %s,
+			is_nullable %s,
+			is_unique %s,
+			is_auto_increment %s,
+			default_value %s,
+			column_comment %s,
+			fk_ref_table %s,
+			fk_ref_column %s,
+			extra %s,
+			FOREIGN KEY (table_schema_id) REFERENCES ldb_table_schemas(id)
+		)`, types.IDType, types.IDType, types.NameType, types.CounterType, types.NameType, types.NameType,
+			types.CounterType, types.CounterType, types.CounterType, types.CounterType,
+			types.CommentType, types.CommentType, types.NameType, types.NameType, types.JSONType),
 		fmt.Sprintf(`CREATE TABLE IF NOT EXISTS ldb_connection_credentials (
 			id %s PRIMARY KEY,
 			connection_id %s NOT NULL,
