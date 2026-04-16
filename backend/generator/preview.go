@@ -153,6 +153,20 @@ type PreviewRuntime interface {
 	Generate(ctx context.Context, generator Generator, genCtx GeneratorContext) (interface{}, error)
 }
 
+// PreviewGlobalSeedProvider 提供连接范围的全局 seed（优先级 3）。
+type PreviewGlobalSeedProvider interface {
+	// GetGlobalSeed 返回连接全局 seed；未配置时 ok=false。
+	//
+	// 输入：
+	// - ctx: 调用上下文。
+	// - connectionID: 连接标识。
+	//
+	// 输出：
+	// - *int64: 全局 seed。
+	// - bool: 是否存在有效全局 seed。
+	GetGlobalSeed(ctx context.Context, connectionID string) (*int64, bool)
+}
+
 // GeneratorPreviewService 提供预览能力，不触发真实写入。
 type GeneratorPreviewService struct {
 	// registry 用于查询生成器实例。
@@ -166,6 +180,9 @@ type GeneratorPreviewService struct {
 
 	// runtime 用于执行生成器调用。
 	runtime PreviewRuntime
+
+	// globalSeedProvider 提供连接范围全局种子（可选）。
+	globalSeedProvider PreviewGlobalSeedProvider
 }
 
 // NewGeneratorPreviewService 创建预览服务实例。
@@ -183,12 +200,14 @@ func NewGeneratorPreviewService(
 	configRepo PreviewServiceConfigRepository,
 	schemaProvider PreviewServiceSchemaProvider,
 	runtime PreviewRuntime,
+	globalSeedProvider PreviewGlobalSeedProvider,
 ) *GeneratorPreviewService {
 	return &GeneratorPreviewService{
 		registry:       registry,
 		configRepo:     configRepo,
 		schemaProvider: schemaProvider,
 		runtime:        runtime,
+		globalSeedProvider: globalSeedProvider,
 	}
 }
 
@@ -253,7 +272,13 @@ func (s *GeneratorPreviewService) previewFieldScope(ctx context.Context, req Pre
 	}
 
 	// 计算生效种子
-	effectiveSeed, seedSource := resolveEffectiveSeed(req.Seed, config.SeedPolicy)
+	var globalSeed *int64
+	if s.globalSeedProvider != nil {
+		if v, ok := s.globalSeedProvider.GetGlobalSeed(ctx, req.ConnectionID); ok {
+			globalSeed = v
+		}
+	}
+	effectiveSeed, seedSource := resolveEffectiveSeed(req.Seed, config.SeedPolicy, globalSeed)
 
 	// 构造生成上下文
 	genCtx := GeneratorContext{
@@ -393,8 +418,14 @@ func (s *GeneratorPreviewService) previewTableScope(ctx context.Context, req Pre
 			continue
 		}
 
-		// 计算生效种子（表范围使用同一请求种子）
-		effectiveSeed, _ := resolveEffectiveSeed(req.Seed, cfg.SeedPolicy)
+		// 计算生效种子（表范围使用同一请求种子/全局种子）
+		var globalSeed *int64
+		if s.globalSeedProvider != nil {
+			if v, ok := s.globalSeedProvider.GetGlobalSeed(ctx, req.ConnectionID); ok {
+				globalSeed = v
+			}
+		}
+		effectiveSeed, _ := resolveEffectiveSeed(req.Seed, cfg.SeedPolicy, globalSeed)
 
 		// 构造生成上下文
 		genCtx := GeneratorContext{
@@ -517,7 +548,7 @@ func sanitizeGeneratorOptsForPreview(opts map[string]interface{}) map[string]int
 }
 
 // resolveEffectiveSeed 计算生效种子与来源。
-func resolveEffectiveSeed(requestSeed *int64, fieldSeedPolicy map[string]interface{}) (*int64, string) {
+func resolveEffectiveSeed(requestSeed *int64, fieldSeedPolicy map[string]interface{}, globalSeed *int64) (*int64, string) {
 	// 优先级 1: 请求显式种子（最高）
 	if requestSeed != nil {
 		return requestSeed, "preview_override"
@@ -537,7 +568,13 @@ func resolveEffectiveSeed(requestSeed *int64, fieldSeedPolicy map[string]interfa
 		}
 	}
 
-	// 优先级 3-4: 全局种子或无种子（MVP 暂不支持全局种子）
+	// 优先级 3: 全局种子
+	// 说明：全局种子来源于运行会话/任务上下文；此处通过外部注入的 globalSeed 进入预览链路。
+	if globalSeed != nil && *globalSeed != 0 {
+		return globalSeed, "global"
+	}
+
+	// 优先级 4: 无种子
 	return nil, "none"
 }
 
@@ -809,7 +846,13 @@ func (s *ConcurrentPreviewService) generateFieldsParallel(
 			defer func() { <-sem }()
 
 			// 计算生效种子
-			effectiveSeed, _ := resolveEffectiveSeed(requestSeed, t.config.SeedPolicy)
+			var globalSeed *int64
+			if s.base.globalSeedProvider != nil {
+				if v, ok := s.base.globalSeedProvider.GetGlobalSeed(ctx, t.schema.ConnectionID); ok {
+					globalSeed = v
+				}
+			}
+			effectiveSeed, _ := resolveEffectiveSeed(requestSeed, t.config.SeedPolicy, globalSeed)
 
 			// 构造上下文
 			genCtx := GeneratorContext{

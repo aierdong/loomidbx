@@ -60,6 +60,7 @@ func NewSchemaScanService(
 	riskAnalyzer *GeneratorCompatibilityAnalyzer,
 	generatorStore GeneratorConfigSnapshotStore,
 	trustGate SchemaTrustGate,
+	recheckSvc CompatibilityRecheckService,
 ) *SchemaScanService {
 	if diffEngine == nil {
 		diffEngine = NewSchemaDiffEngine()
@@ -79,7 +80,7 @@ func NewSchemaScanService(
 		riskByTask:     make(map[string]GeneratorCompatibilityRisksResult),
 		pendingByTask:  make(map[string]*CurrentSchemaBundle),
 	}
-	svc.syncService = NewSchemaSyncService(runtime, svc, currentRepo, trustGate)
+	svc.syncService = NewSchemaSyncService(runtime, svc, currentRepo, trustGate, recheckSvc)
 	return svc
 }
 

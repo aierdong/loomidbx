@@ -217,7 +217,15 @@ func (a *SchemaFFIAdapter) ApplySchemaSync(reqJSON string) string {
 	if syncErr != nil {
 		return marshalResponse(ffiSchemaError(syncErr.Code, syncErr.Message))
 	}
-	return marshalResponse(&FFIResponse{Ok: true, Data: result})
+	if result == nil {
+		return marshalResponse(ffiSchemaError("FAILED_PRECONDITION", "schema syncer returned empty result"))
+	}
+	payload := map[string]interface{}{
+		"sync_applied":          result.SyncApplied,
+		"trust_state":           result.TrustState,
+		"compatibility_recheck": result.CompatibilityRecheck,
+	}
+	return marshalResponse(&FFIResponse{Ok: true, Data: payload})
 }
 
 // StartSchemaRescan 执行 StartSchemaRescan 的 JSON 适配。
@@ -296,6 +304,7 @@ func (a *SchemaFFIAdapter) GetSchemaTrustState(reqJSON string) string {
 		"reason":               view.LastBlockingReason,
 		"last_schema_scan_unix": view.LastSchemaScanUnix,
 		"last_schema_sync_unix": view.LastSchemaSyncUnix,
+		"compatibility_report":  view.CompatibilityReport,
 	}})
 }
 

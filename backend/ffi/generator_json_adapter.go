@@ -72,7 +72,7 @@ func NewGeneratorFFIAdapter(
 	runtime generator.PreviewRuntime,
 	trustReader GeneratorTrustStateReader,
 ) *GeneratorFFIAdapter {
-	previewService := generator.NewGeneratorPreviewService(registry, configRepo, schemaProvider, runtime)
+	previewService := generator.NewGeneratorPreviewService(registry, configRepo, schemaProvider, runtime, nil)
 	return &GeneratorFFIAdapter{
 		registry:       registry,
 		configRepo:     configRepo,

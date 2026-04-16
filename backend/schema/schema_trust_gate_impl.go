@@ -44,6 +44,7 @@ func (g *trustGateImpl) GetSchemaTrustState(ctx context.Context, connectionID st
 		LastBlockingReason:   meta.SchemaLastBlockingReason,
 		LastSchemaScanUnix:   meta.LastSchemaScanUnix,
 		LastSchemaSyncUnix:   meta.LastSchemaSyncUnix,
+		CompatibilityReport:  meta.CompatibilityReport,
 	}, nil
 }
 

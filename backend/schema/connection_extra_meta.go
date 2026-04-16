@@ -22,6 +22,9 @@ const (
 
 	// ExtraKeyLastSchemaSyncUnix 为 extra JSON 中最后一次成功同步当前 schema 的 Unix 秒时间戳。
 	ExtraKeyLastSchemaSyncUnix = "last_schema_sync_unix"
+
+	// ExtraKeyCompatibilityReport 为 extra JSON 中最新兼容性重判定报告快照字段名。
+	ExtraKeyCompatibilityReport = "compatibility_report"
 )
 
 // ConnectionSchemaMeta 表示从 ldb_connections.extra 解析出的 schema 子域元数据读模型。
@@ -37,6 +40,9 @@ type ConnectionSchemaMeta struct {
 
 	// LastSchemaSyncUnix 为最后成功同步当前 schema 时间（Unix 秒）；0 表示尚未记录。
 	LastSchemaSyncUnix int64 `json:"last_schema_sync_unix"`
+
+	// CompatibilityReport 为最新一次兼容性重判定报告快照；nil 表示尚未生成。
+	CompatibilityReport *CompatibilityReportSnapshot `json:"compatibility_report,omitempty"`
 }
 
 // ConnectionSchemaMetaPatch 描述对 extra 中 schema 子域字段的部分更新；nil 指针表示不修改该字段。
@@ -52,11 +58,62 @@ type ConnectionSchemaMetaPatch struct {
 
 	// LastSchemaSyncUnix 非 nil 时写入 last_schema_sync_unix。
 	LastSchemaSyncUnix *int64
+
+	// CompatibilityReport 非 nil 时写入 compatibility_report；允许写入空快照用于清空。
+	CompatibilityReport *CompatibilityReportSnapshot
 }
 
 // IsEmpty 判断 patch 是否不包含任何有效字段更新。
 func (p ConnectionSchemaMetaPatch) IsEmpty() bool {
-	return p.TrustState == nil && p.LastBlockingReason == nil && p.LastSchemaScanUnix == nil && p.LastSchemaSyncUnix == nil
+	return p.TrustState == nil &&
+		p.LastBlockingReason == nil &&
+		p.LastSchemaScanUnix == nil &&
+		p.LastSchemaSyncUnix == nil &&
+		p.CompatibilityReport == nil
+}
+
+// CompatibilityRecheckStatus 表示兼容性重判定的执行状态。
+type CompatibilityRecheckStatus string
+
+const (
+	// CompatibilityRecheckStatusSuccess 表示重判定成功并产出报告。
+	CompatibilityRecheckStatusSuccess CompatibilityRecheckStatus = "success"
+
+	// CompatibilityRecheckStatusFailed 表示重判定失败（报告可能为空或旧值）。
+	CompatibilityRecheckStatusFailed CompatibilityRecheckStatus = "failed"
+
+	// CompatibilityRecheckStatusSkippedNoGeneratorConfig 表示无生成器配置可判定，跳过并产出空报告。
+	CompatibilityRecheckStatusSkippedNoGeneratorConfig CompatibilityRecheckStatus = "skipped_no_generator_config"
+)
+
+// CompatibilityReportSummary 为兼容性报告的摘要字段，便于 UI 快速展示。
+type CompatibilityReportSummary struct {
+	// Mode 与 risks API 的 mode 保持一致（configured/no_generator_config）。
+	Mode GeneratorCompatibilityRiskMode `json:"mode"`
+
+	// TotalRisks 为风险总数。
+	TotalRisks int `json:"total_risks"`
+
+	// BlockingRisks 为阻断级风险数量。
+	BlockingRisks int `json:"blocking_risks"`
+}
+
+// CompatibilityReportSnapshot 表示连接维度最新一次兼容性重判定报告快照（落在 ldb_connections.extra）。
+type CompatibilityReportSnapshot struct {
+	// Status 为重判定状态。
+	Status CompatibilityRecheckStatus `json:"status"`
+
+	// GeneratedAtUnix 为报告生成时间（Unix 秒）。
+	GeneratedAtUnix int64 `json:"generated_at_unix"`
+
+	// ErrorCode 为失败时的稳定错误码；成功/跳过时为空。
+	ErrorCode string `json:"error_code,omitempty"`
+
+	// Summary 为报告摘要。
+	Summary CompatibilityReportSummary `json:"summary"`
+
+	// Risks 为风险列表；无配置或无风险时必须为 [] 而不是 nil（便于 JSON 契约稳定）。
+	Risks []GeneratorCompatibilityRisk `json:"risks"`
 }
 
 // ParseConnectionSchemaMeta 从 extra JSON 解析 schema 子域元数据。
@@ -109,6 +166,22 @@ func ParseConnectionSchemaMeta(extraJSON string) (ConnectionSchemaMeta, error) {
 		}
 		out.LastSchemaSyncUnix = n
 	}
+	if v, ok := raw[ExtraKeyCompatibilityReport]; ok && v != nil {
+		// 兼容 map[string]interface{} / json.RawMessage 等多种解码形态：先 marshal 再 unmarshal 到结构体。
+		b, err := json.Marshal(v)
+		if err != nil {
+			return ConnectionSchemaMeta{}, fmt.Errorf("decode compatibility_report: %w", err)
+		}
+		var snap CompatibilityReportSnapshot
+		if err := json.Unmarshal(b, &snap); err != nil {
+			return ConnectionSchemaMeta{}, fmt.Errorf("decode compatibility_report: %w", err)
+		}
+		// 保证 risks 非 nil，避免上层 JSON 输出不稳定。
+		if snap.Risks == nil {
+			snap.Risks = []GeneratorCompatibilityRisk{}
+		}
+		out.CompatibilityReport = &snap
+	}
 	return out, nil
 }
 
@@ -148,6 +221,13 @@ func MergeConnectionExtraSchemaMeta(existingExtra string, patch ConnectionSchema
 	}
 	if patch.LastSchemaSyncUnix != nil {
 		m[ExtraKeyLastSchemaSyncUnix] = *patch.LastSchemaSyncUnix
+	}
+	if patch.CompatibilityReport != nil {
+		// 写入前保证 risks 非 nil，避免 JSON 输出不稳定。
+		if patch.CompatibilityReport.Risks == nil {
+			patch.CompatibilityReport.Risks = []GeneratorCompatibilityRisk{}
+		}
+		m[ExtraKeyCompatibilityReport] = patch.CompatibilityReport
 	}
 	out, err := json.Marshal(m)
 	if err != nil {

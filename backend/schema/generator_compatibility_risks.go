@@ -102,6 +102,9 @@ type GeneratorColumnConfig struct {
 	// ColumnName 为配置绑定字段名。
 	ColumnName string
 
+	// GeneratorType 为已保存的生成器类型标识（用于同步后重判定）。
+	GeneratorType string
+
 	// ConfigID 为配置唯一标识（来自 spec-03 存储层）。
 	ConfigID string
 }

@@ -78,6 +78,7 @@ func TestSchemaScanService_CompletePreviewAndSync_NoGeneratorConfig(t *testing.T
 		NewGeneratorCompatibilityAnalyzer(),
 		nil,
 		NewSchemaTrustGate(trustRepo),
+		NoopCompatibilityRecheckService{},
 	)
 
 	start, startErr := service.StartSchemaScan("conn-1", SchemaScanScopeAll, nil, "manual")
@@ -147,6 +148,7 @@ func TestSchemaScanService_PreviewSchemaDiff_NotReady(t *testing.T) {
 		NewGeneratorCompatibilityAnalyzer(),
 		nil,
 		NewSchemaTrustGate(trustRepo),
+		NoopCompatibilityRecheckService{},
 	)
 
 	start, startErr := service.StartSchemaScan("conn-1", SchemaScanScopeAll, nil, "manual")
@@ -184,6 +186,7 @@ func TestSchemaScanService_BlockingRiskBlocksSyncWithoutAck(t *testing.T) {
 						SchemaName:   "public",
 						TableName:    "users",
 						ColumnName:   "name",
+						GeneratorType: "EnumValueGenerator",
 						ConfigID:     "cfg-users-name",
 					},
 				},
@@ -198,6 +201,7 @@ func TestSchemaScanService_BlockingRiskBlocksSyncWithoutAck(t *testing.T) {
 		NewGeneratorCompatibilityAnalyzer(),
 		genStore,
 		NewSchemaTrustGate(trustRepo),
+		NoopCompatibilityRecheckService{},
 	)
 
 	start, startErr := service.StartSchemaScan("conn-1", SchemaScanScopeAll, nil, "manual")
@@ -259,6 +263,7 @@ func TestSchemaScanService_EndToEndLoop_ScanDiffRiskSync(t *testing.T) {
 						SchemaName:   "public",
 						TableName:    "users",
 						ColumnName:   "name",
+						GeneratorType: "EnumValueGenerator",
 						ConfigID:     "cfg-users-name",
 					},
 				},
@@ -273,6 +278,7 @@ func TestSchemaScanService_EndToEndLoop_ScanDiffRiskSync(t *testing.T) {
 		NewGeneratorCompatibilityAnalyzer(),
 		genStore,
 		NewSchemaTrustGate(trustRepo),
+		NoopCompatibilityRecheckService{},
 	)
 
 	startAll, startAllErr := service.StartSchemaScan("conn-1", SchemaScanScopeAll, nil, "manual")
@@ -427,6 +433,7 @@ func TestSchemaScanService_EndToEndLoop_SyncFailureInjection(t *testing.T) {
 				NewGeneratorCompatibilityAnalyzer(),
 				nil,
 				NewSchemaTrustGate(trustRepo),
+				NoopCompatibilityRecheckService{},
 			)
 
 			start, startErr := service.StartSchemaScan("conn-1", SchemaScanScopeAll, nil, "manual")
@@ -519,6 +526,7 @@ func TestSchemaScanService_EndToEndLoop_BlockingRiskAckStillFailsOnStorageError(
 						SchemaName:   "public",
 						TableName:    "users",
 						ColumnName:   "name",
+						GeneratorType: "EnumValueGenerator",
 						ConfigID:     "cfg-users-name",
 					},
 				},
@@ -533,6 +541,7 @@ func TestSchemaScanService_EndToEndLoop_BlockingRiskAckStillFailsOnStorageError(
 		NewGeneratorCompatibilityAnalyzer(),
 		genStore,
 		NewSchemaTrustGate(trustRepo),
+		NoopCompatibilityRecheckService{},
 	)
 
 	start, startErr := service.StartSchemaScan("conn-1", SchemaScanScopeAll, nil, "manual")

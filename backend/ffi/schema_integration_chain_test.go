@@ -341,7 +341,7 @@ func newSchemaIntegrationHarness(t *testing.T, connectionID string) *schemaInteg
 		h.taskSeq++
 		return fmt.Sprintf("task-%d", h.taskSeq)
 	})
-	h.syncService = schema.NewSchemaSyncService(h.runtime, h.previewStore, h.currentRepo, h.trustGate)
+	h.syncService = schema.NewSchemaSyncService(h.runtime, h.previewStore, h.currentRepo, h.trustGate, schema.NoopCompatibilityRecheckService{})
 	return h
 }
 

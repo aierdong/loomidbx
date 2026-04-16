@@ -189,6 +189,54 @@ func TestSchemaFFIAdapter_GetSchemaTrustState_OK(t *testing.T) {
 	})
 	resp := adapter.GetSchemaTrustState(`{"connection_id":"conn-1"}`)
 	assertFFIOKWithData(t, resp)
+
+	var parsed map[string]interface{}
+	if err := json.Unmarshal([]byte(resp), &parsed); err != nil {
+		t.Fatalf("parse response failed: %v", err)
+	}
+	data := parsed["data"].(map[string]interface{})
+	if _, ok := data["compatibility_report"]; !ok {
+		t.Fatalf("expected compatibility_report field, got %v", data)
+	}
+}
+
+func TestSchemaFFIAdapter_ApplySchemaSync_SuccessIncludesCompatibilityRecheck(t *testing.T) {
+	adapter := ffi.NewSchemaFFIAdapter(schemaFFIDeps{
+		Syncer: &fakeSyncer{
+			result: &schema.ApplySchemaSyncResult{
+				SyncApplied: true,
+				TrustState:  schema.SchemaTrustTrusted,
+				CompatibilityRecheck: schema.CompatibilityReportSnapshot{
+					Status:          schema.CompatibilityRecheckStatusSuccess,
+					GeneratedAtUnix: 1700000000,
+					Summary: schema.CompatibilityReportSummary{
+						Mode:          schema.GeneratorCompatibilityModeNoGeneratorConfig,
+						TotalRisks:    0,
+						BlockingRisks: 0,
+					},
+					Risks: []schema.GeneratorCompatibilityRisk{},
+				},
+			},
+		},
+	})
+	resp := adapter.ApplySchemaSync(`{"task_id":"task-1","ack_risk_ids":[]}`)
+	assertFFIOKWithData(t, resp)
+
+	var parsed map[string]interface{}
+	if err := json.Unmarshal([]byte(resp), &parsed); err != nil {
+		t.Fatalf("parse response failed: %v", err)
+	}
+	data := parsed["data"].(map[string]interface{})
+	if data["sync_applied"] != true {
+		t.Fatalf("expected sync_applied=true, got %v", data["sync_applied"])
+	}
+	if data["trust_state"] != string(schema.SchemaTrustTrusted) && data["trust_state"] != schema.SchemaTrustTrusted {
+		// json.Unmarshal 可能把枚举当 string
+		t.Fatalf("unexpected trust_state: %v", data["trust_state"])
+	}
+	if _, ok := data["compatibility_recheck"]; !ok {
+		t.Fatalf("expected compatibility_recheck field, got %v", data)
+	}
 }
 
 func TestSchemaFFIAdapter_ParseErrorToInvalidArgument(t *testing.T) {

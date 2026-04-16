@@ -13,6 +13,9 @@ const (
 
 	// SchemaSyncErrCodeStorageError 表示当前 schema 落库写入失败。
 	SchemaSyncErrCodeStorageError = "STORAGE_ERROR"
+
+	// SchemaSyncErrCodeCompatibilityRecheckFailed 表示 schema 同步成功但兼容性重判定失败。
+	SchemaSyncErrCodeCompatibilityRecheckFailed = "COMPATIBILITY_RECHECK_FAILED"
 )
 
 // SchemaSyncRuntimeReader 读取扫描任务运行时上下文（用于 task_id -> connection_id 解析）。
@@ -43,6 +46,9 @@ type ApplySchemaSyncResult struct {
 
 	// TrustState 为同步动作结束后的可信度状态。
 	TrustState SchemaTrustState
+
+	// CompatibilityRecheck 为同步后触发的兼容性重判定结果快照。
+	CompatibilityRecheck CompatibilityReportSnapshot
 }
 
 // SchemaSyncError 表示 ApplySchemaSync 的结构化错误。
@@ -89,6 +95,9 @@ type SchemaSyncService struct {
 
 	// trustGate 负责阻断风险校验与可信度状态迁移。
 	trustGate SchemaTrustGate
+
+	// recheckSvc 在 schema 同步成功后触发全量兼容性重判定。
+	recheckSvc CompatibilityRecheckService
 }
 
 // NewSchemaSyncService 构造 SchemaSyncService。
@@ -97,12 +106,17 @@ func NewSchemaSyncService(
 	previewStore SchemaSyncPreviewStore,
 	currentRepo CurrentSchemaRepository,
 	trustGate SchemaTrustGate,
+	recheckSvc CompatibilityRecheckService,
 ) *SchemaSyncService {
+	if recheckSvc == nil {
+		recheckSvc = NoopCompatibilityRecheckService{}
+	}
 	return &SchemaSyncService{
 		runtimeReader: runtimeReader,
 		previewStore:  previewStore,
 		currentRepo:   currentRepo,
 		trustGate:     trustGate,
+		recheckSvc:    recheckSvc,
 	}
 }
 
@@ -204,8 +218,25 @@ func (s *SchemaSyncService) ApplySchemaSync(ctx context.Context, req ApplySchema
 			Message: "current schema synced but trust state update failed",
 		}
 	}
+
+	recheckSnapshot, recheckErr := s.recheckSvc.RevalidateAllConfigs(ctx, connectionID)
+	if recheckErr != nil {
+		// 设计决策：重判定失败不回滚同步成功语义，仅在返回体中暴露 failed 状态并带稳定 error_code。
+		recheckSnapshot = CompatibilityReportSnapshot{
+			Status:          CompatibilityRecheckStatusFailed,
+			GeneratedAtUnix: recheckSnapshot.GeneratedAtUnix,
+			ErrorCode:       SchemaSyncErrCodeCompatibilityRecheckFailed,
+			Summary: CompatibilityReportSummary{
+				Mode:          GeneratorCompatibilityModeConfigured,
+				TotalRisks:    0,
+				BlockingRisks: 0,
+			},
+			Risks: []GeneratorCompatibilityRisk{},
+		}
+	}
 	return &ApplySchemaSyncResult{
 		SyncApplied: true,
 		TrustState:  nextTrustState,
+		CompatibilityRecheck: recheckSnapshot,
 	}, nil
 }

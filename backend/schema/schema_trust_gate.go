@@ -15,6 +15,9 @@ type TrustStateView struct {
 
 	// LastSchemaSyncUnix 为最后成功同步当前 schema 时间（Unix 秒）；0 表示未记录。
 	LastSchemaSyncUnix int64
+
+	// CompatibilityReport 为最新一次兼容性重判定报告快照；nil 表示尚未生成。
+	CompatibilityReport *CompatibilityReportSnapshot
 }
 
 // TrustStateUpdateInput 描述一次状态迁移的输入；编排层在扫描/Diff/风险分析/同步各阶段填入对应信号。

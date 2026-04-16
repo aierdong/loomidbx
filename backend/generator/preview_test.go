@@ -38,7 +38,7 @@ func TestPreviewFieldScopeReturnsSamples(t *testing.T) {
 		{ConnectionID: "c1", Table: "users", Column: "name", AbstractType: "string", ColumnID: "col-1"},
 	})
 
-	svc := NewGeneratorPreviewService(reg, repo, schemaProvider, NewGeneratorRuntime())
+	svc := NewGeneratorPreviewService(reg, repo, schemaProvider, NewGeneratorRuntime(), nil)
 
 	result, err := svc.PreviewGeneration(context.Background(), PreviewRequest{
 		ConnectionID: "c1",
@@ -106,7 +106,7 @@ func TestPreviewTableScopeReturnsColumnMap(t *testing.T) {
 		{ConnectionID: "c1", Table: "users", Column: "name", AbstractType: "string", ColumnID: "col-name"},
 	})
 
-	svc := NewGeneratorPreviewService(reg, repo, schemaProvider, NewGeneratorRuntime())
+	svc := NewGeneratorPreviewService(reg, repo, schemaProvider, NewGeneratorRuntime(), nil)
 
 	result, err := svc.PreviewGeneration(context.Background(), PreviewRequest{
 		ConnectionID: "c1",
@@ -165,7 +165,7 @@ func TestPreviewWithFixedSeedReproducible(t *testing.T) {
 		{ConnectionID: "c1", Table: "users", Column: "name", AbstractType: "string", ColumnID: "col-1"},
 	})
 
-	svc := NewGeneratorPreviewService(reg, repo, schemaProvider, NewGeneratorRuntime())
+	svc := NewGeneratorPreviewService(reg, repo, schemaProvider, NewGeneratorRuntime(), nil)
 
 	seed := int64(42)
 
@@ -235,7 +235,7 @@ func TestPreviewMetadataContainsRequiredFields(t *testing.T) {
 		{ConnectionID: "c1", Table: "users", Column: "name", AbstractType: "string", ColumnID: "col-1"},
 	})
 
-	svc := NewGeneratorPreviewService(reg, repo, schemaProvider, NewGeneratorRuntime())
+	svc := NewGeneratorPreviewService(reg, repo, schemaProvider, NewGeneratorRuntime(), nil)
 
 	seed := int64(12345)
 	result, err := svc.PreviewGeneration(context.Background(), PreviewRequest{
@@ -296,7 +296,7 @@ func TestPreviewDisabledFieldReturnsError(t *testing.T) {
 		{ConnectionID: "c1", Table: "users", Column: "email", AbstractType: "string", ColumnID: "col-1"},
 	})
 
-	svc := NewGeneratorPreviewService(reg, repo, schemaProvider, NewGeneratorRuntime())
+	svc := NewGeneratorPreviewService(reg, repo, schemaProvider, NewGeneratorRuntime(), nil)
 
 	_, err := svc.PreviewGeneration(context.Background(), PreviewRequest{
 		ConnectionID: "c1",
@@ -345,7 +345,7 @@ func TestPreviewNoSeedMarkedNonDeterministic(t *testing.T) {
 		{ConnectionID: "c1", Table: "users", Column: "name", AbstractType: "string", ColumnID: "col-1"},
 	})
 
-	svc := NewGeneratorPreviewService(reg, repo, schemaProvider, NewGeneratorRuntime())
+	svc := NewGeneratorPreviewService(reg, repo, schemaProvider, NewGeneratorRuntime(), nil)
 
 	result, err := svc.PreviewGeneration(context.Background(), PreviewRequest{
 		ConnectionID: "c1",
@@ -370,6 +370,67 @@ func TestPreviewNoSeedMarkedNonDeterministic(t *testing.T) {
 
 	if result.Metadata.SeedSource != "none" {
 		t.Fatalf("expected seed_source=none, got %s", result.Metadata.SeedSource)
+	}
+}
+
+type staticGlobalSeedProvider struct {
+	seed *int64
+}
+
+func (p staticGlobalSeedProvider) GetGlobalSeed(_ context.Context, _ string) (*int64, bool) {
+	if p.seed == nil || *p.seed == 0 {
+		return nil, false
+	}
+	return p.seed, true
+}
+
+// TestPreviewGlobalSeedUsedWhenNoRequestOrFixedSeed 测试全局种子优先级（priority=3）。
+func TestPreviewGlobalSeedUsedWhenNoRequestOrFixedSeed(t *testing.T) {
+	reg := NewGeneratorRegistry()
+	mustRegisterPreview(t, reg, NewStaticGenerator(GeneratorMeta{
+		Type:          GeneratorTypeStringRandomChars,
+		TypeTags:      []string{"supports:string"},
+		Deterministic: true,
+	}))
+
+	globalSeed := int64(123)
+	repo := NewPreviewableConfigRepository()
+	_, _ = repo.UpsertFieldConfig(context.Background(), FieldGeneratorConfig{
+		ColumnSchemaID: "col-1",
+		ConnectionID:   "c1",
+		Table:          "users",
+		Column:         "name",
+		GeneratorType:  GeneratorTypeStringRandomChars,
+		GeneratorOpts:  map[string]interface{}{},
+		SeedPolicy:     map[string]interface{}{"mode": "inherit_global"},
+		IsEnabled:      true,
+	})
+
+	schemaProvider := NewPreviewableSchemaProvider([]FieldSchema{
+		{ConnectionID: "c1", Table: "users", Column: "name", AbstractType: "string", ColumnID: "col-1"},
+	})
+
+	svc := NewGeneratorPreviewService(reg, repo, schemaProvider, NewGeneratorRuntime(), staticGlobalSeedProvider{seed: &globalSeed})
+
+	result, err := svc.PreviewGeneration(context.Background(), PreviewRequest{
+		ConnectionID: "c1",
+		Scope:        PreviewScopeField,
+		Table:        "users",
+		Column:       "name",
+		SampleSize:   3,
+		Seed:         nil,
+	})
+	if err != nil {
+		t.Fatalf("preview failed: %v", err)
+	}
+	if result.Metadata.Seed != globalSeed {
+		t.Fatalf("expected seed=%d (global), got %d", globalSeed, result.Metadata.Seed)
+	}
+	if result.Metadata.SeedSource != "global" {
+		t.Fatalf("expected seed_source=global, got %s", result.Metadata.SeedSource)
+	}
+	if !result.Metadata.Deterministic {
+		t.Fatalf("expected deterministic=true with global seed")
 	}
 }
 
@@ -400,7 +461,7 @@ func TestPreviewSeedPolicyFixed(t *testing.T) {
 		{ConnectionID: "c1", Table: "users", Column: "name", AbstractType: "string", ColumnID: "col-1"},
 	})
 
-	svc := NewGeneratorPreviewService(reg, repo, schemaProvider, NewGeneratorRuntime())
+	svc := NewGeneratorPreviewService(reg, repo, schemaProvider, NewGeneratorRuntime(), nil)
 
 	result, err := svc.PreviewGeneration(context.Background(), PreviewRequest{
 		ConnectionID: "c1",
@@ -456,7 +517,7 @@ func TestPreviewRequestSeedOverridesFieldPolicy(t *testing.T) {
 		{ConnectionID: "c1", Table: "users", Column: "name", AbstractType: "string", ColumnID: "col-1"},
 	})
 
-	svc := NewGeneratorPreviewService(reg, repo, schemaProvider, NewGeneratorRuntime())
+	svc := NewGeneratorPreviewService(reg, repo, schemaProvider, NewGeneratorRuntime(), nil)
 
 	result, err := svc.PreviewGeneration(context.Background(), PreviewRequest{
 		ConnectionID: "c1",
@@ -505,7 +566,7 @@ func TestPreviewGeneratorsResetBetweenRequests(t *testing.T) {
 		{ConnectionID: "c1", Table: "users", Column: "name", AbstractType: "string", ColumnID: "col-1"},
 	})
 
-	svc := NewGeneratorPreviewService(reg, repo, schemaProvider, NewGeneratorRuntime())
+	svc := NewGeneratorPreviewService(reg, repo, schemaProvider, NewGeneratorRuntime(), nil)
 
 	seed := int64(1)
 
@@ -552,7 +613,7 @@ func TestPreviewConfigNotFound(t *testing.T) {
 		{ConnectionID: "c1", Table: "users", Column: "name", AbstractType: "string", ColumnID: "col-1"},
 	})
 
-	svc := NewGeneratorPreviewService(reg, repo, schemaProvider, NewGeneratorRuntime())
+	svc := NewGeneratorPreviewService(reg, repo, schemaProvider, NewGeneratorRuntime(), nil)
 
 	_, err := svc.PreviewGeneration(context.Background(), PreviewRequest{
 		ConnectionID: "c1",
@@ -639,7 +700,7 @@ func TestPreviewTablePartialSuccess(t *testing.T) {
 		{ConnectionID: "c1", Table: "users", Column: "phone", AbstractType: "string", ColumnID: "col-phone"},
 	})
 
-	svc := NewGeneratorPreviewService(reg, repo, schemaProvider, NewGeneratorRuntime())
+	svc := NewGeneratorPreviewService(reg, repo, schemaProvider, NewGeneratorRuntime(), nil)
 
 	result, err := svc.PreviewGeneration(context.Background(), PreviewRequest{
 		ConnectionID: "c1",
@@ -737,7 +798,7 @@ func TestPreviewFieldResultsConsistencyWithSamples(t *testing.T) {
 		{ConnectionID: "c1", Table: "users", Column: "name", AbstractType: "string", ColumnID: "col-1"},
 	})
 
-	svc := NewGeneratorPreviewService(reg, repo, schemaProvider, NewGeneratorRuntime())
+	svc := NewGeneratorPreviewService(reg, repo, schemaProvider, NewGeneratorRuntime(), nil)
 
 	result, err := svc.PreviewGeneration(context.Background(), PreviewRequest{
 		ConnectionID: "c1",
@@ -813,7 +874,7 @@ func TestPreviewExternalDependencyNotReady(t *testing.T) {
 		return true, ""
 	})
 
-	svc := NewGeneratorPreviewService(reg, repo, schemaProvider, runtime)
+	svc := NewGeneratorPreviewService(reg, repo, schemaProvider, runtime, nil)
 
 	_, err := svc.PreviewGeneration(context.Background(), PreviewRequest{
 		ConnectionID: "c1",
@@ -876,7 +937,7 @@ func TestPreviewComputedContextDependencyNotReady(t *testing.T) {
 		return true, ""
 	})
 
-	svc := NewGeneratorPreviewService(reg, repo, schemaProvider, runtime)
+	svc := NewGeneratorPreviewService(reg, repo, schemaProvider, runtime, nil)
 
 	_, err := svc.PreviewGeneration(context.Background(), PreviewRequest{
 		ConnectionID: "c1",
@@ -949,7 +1010,7 @@ func TestPreviewTableScopeExternalDependencyReturnsFieldResult(t *testing.T) {
 		return true, ""
 	})
 
-	svc := NewGeneratorPreviewService(reg, repo, schemaProvider, runtime)
+	svc := NewGeneratorPreviewService(reg, repo, schemaProvider, runtime, nil)
 
 	result, err := svc.PreviewGeneration(context.Background(), PreviewRequest{
 		ConnectionID: "c1",
