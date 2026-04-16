@@ -237,3 +237,46 @@ ok      loomidbx/ffi    (测试全部通过)
 - 未解决问题/风险：<如无写“无”>
 - 下一批前置条件：<满足/不满足 + 原因>
 ```
+
+
+
+- 将已完成任务在 tasks.md 中标记完成
+  - 已将 `spec-03-generator-framework/tasks.md` 中 6.1, 6.2, 6.3, 6.5, 6.6 勾选为 `- [x]`
+- 已完成任务：6.1，6.2，6.3，6.4，6.5，6.6
+- 变更文件：
+  - `.kiro/specs/spec-03-generator-framework/tasks.md`
+  - `backend/generator/enum_values_validation_test.go`
+  - `backend/ffi/generator_json_adapter_test.go`
+- 验证结果：
+  - 测试命令：`go test ./...`（在 `backend/` 目录执行）
+  - 结果摘要：全部通过
+- 未解决问题/风险：无
+- 下一批前置条件：不满足（原因：后续跨 spec 联调（如 `tasks.md` 的 6.4）需要 `spec-04` 执行链路，以及 `spec-08/spec-09` 的扩展依赖检查契约具备可联调的实现或可控的模拟实现）
+
+---
+
+- 将已完成任务在 tasks.md 中标记完成
+  - 已在 `.kiro/specs/spec-03-generator-framework/tasks.md` 将 6.7, 6.8, 6.9, 6.10, 6.11, 6.12, 6.13 勾选为完成（以最新 `design.md` 契约为准）。
+- 已完成任务：
+  - 6.7
+  - 6.8
+  - 6.9
+  - 6.10
+  - 6.11
+  - 6.12
+  - 6.13
+- 变更文件：
+  - `.kiro/specs/spec-03-generator-framework/tasks.md`
+  - `backend/ffi/json_adapter.go`
+  - `backend/ffi/generator_json_adapter.go`
+  - `backend/ffi/generator_json_adapter_test.go`
+  - `backend/generator/framework_test.go`
+  - `backend/generator/enum_values_validation_test.go`
+  - `docs/spec-03-generator-framework-batch.md`
+- 验证结果：
+  - 测试命令：在 `backend` 目录执行 `go test ./... -count=1`
+  - 结果摘要：全部通过（包含 `loomidbx/ffi`、`loomidbx/generator`、`loomidbx/schema` 等；无失败用例）
+- 未解决问题/风险：
+  - 无
+- 下一批前置条件：
+  - 满足：批次 C（6.7–6.13）已按最新 `design.md` 完成实现与测试矩阵（覆盖 schema trust 三态；并补齐/强化 `PREVIEW_TABLE_PARTIAL_SUCCESS_V1` 契约断言），且全量后端测试通过。

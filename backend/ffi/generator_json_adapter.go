@@ -16,7 +16,22 @@ import (
 
 	"loomidbx/app"
 	"loomidbx/generator"
+	"loomidbx/schema"
 )
+
+const (
+	// generatorFFITrustReasonPendingRescan 为 schema trust 门禁 pending_rescan 的稳定 reason。
+	generatorFFITrustReasonPendingRescan = "SCHEMA_TRUST_PENDING_RESCAN"
+
+	// generatorFFITrustReasonPendingAdjustment 为 schema trust 门禁 pending_adjustment 的稳定 reason。
+	generatorFFITrustReasonPendingAdjustment = "SCHEMA_TRUST_PENDING_ADJUSTMENT"
+)
+
+// GeneratorTrustStateReader 定义 Generator FFI 层读取 schema trust 状态的最小依赖接口。
+type GeneratorTrustStateReader interface {
+	// GetSchemaTrustState 返回连接可信度状态视图。
+	GetSchemaTrustState(connectionID string) (schema.TrustStateView, error)
+}
 
 // GeneratorFFIAdapter 是 Generator FFI JSON 适配器。
 type GeneratorFFIAdapter struct {
@@ -34,6 +49,9 @@ type GeneratorFFIAdapter struct {
 
 	// previewService 用于执行预览。
 	previewService *generator.GeneratorPreviewService
+
+	// trustReader 用于读取连接 schema trust 状态；为空时视为 trusted（兼容无闸门依赖场景）。
+	trustReader GeneratorTrustStateReader
 }
 
 // NewGeneratorFFIAdapter 创建 Generator FFI 适配器实例。
@@ -43,6 +61,7 @@ type GeneratorFFIAdapter struct {
 // - configRepo: 扩展的配置仓储实例。
 // - schemaProvider: 扩展的 schema 提供器实例。
 // - runtime: 生成器运行时实例。
+// - trustReader: schema trust 状态读取器（可为空）。
 //
 // 输出：
 // - *GeneratorFFIAdapter: 初始化后的适配器实例。
@@ -51,6 +70,7 @@ func NewGeneratorFFIAdapter(
 	configRepo generator.PreviewServiceConfigRepository,
 	schemaProvider generator.PreviewServiceSchemaProvider,
 	runtime generator.PreviewRuntime,
+	trustReader GeneratorTrustStateReader,
 ) *GeneratorFFIAdapter {
 	previewService := generator.NewGeneratorPreviewService(registry, configRepo, schemaProvider, runtime)
 	return &GeneratorFFIAdapter{
@@ -59,6 +79,7 @@ func NewGeneratorFFIAdapter(
 		schemaProvider: schemaProvider,
 		runtime:        runtime,
 		previewService: previewService,
+		trustReader:    trustReader,
 	}
 }
 
@@ -214,6 +235,12 @@ type PreviewMetadataData struct {
 	// Scope 是预览范围。
 	Scope PreviewScopeData `json:"scope"`
 
+	// GeneratorType 是使用的生成器类型（field scope 时；table scope 为空字符串但字段存在）。
+	GeneratorType string `json:"generator_type"`
+
+	// ParamsSummary 是参数摘要（field scope 必填；table scope 返回空对象）。
+	ParamsSummary map[string]interface{} `json:"params_summary"`
+
 	// SampleSize 是样本数量。
 	SampleSize int `json:"sample_size"`
 
@@ -228,6 +255,9 @@ type PreviewMetadataData struct {
 
 	// PartialSuccess 表示是否为部分成功。
 	PartialSuccess bool `json:"partial_success"`
+
+	// SeedSource 表示种子来源（preview_override/field_fixed/global/none）。
+	SeedSource string `json:"seed_source"`
 }
 
 // PreviewFieldResultData 是字段级结果结构。
@@ -241,11 +271,11 @@ type PreviewFieldResultData struct {
 	// SampleCount 是样本数量。
 	SampleCount int `json:"sample_count"`
 
-	// ErrorCode 是错误码（nullable）。
-	ErrorCode string `json:"error_code,omitempty"`
+	// ErrorCode 是错误码（nullable；契约要求字段存在，成功场景为 null）。
+	ErrorCode *string `json:"error_code"`
 
-	// Warning 是警告提示（nullable）。
-	Warning string `json:"warning,omitempty"`
+	// Warning 是警告提示（nullable；契约要求字段存在，成功场景为 null）。
+	Warning *string `json:"warning"`
 }
 
 // FFIWarning 是 FFI 警告结构。
@@ -383,6 +413,10 @@ func (a *GeneratorFFIAdapter) SaveFieldGeneratorConfigJSON(reqJSON string) strin
 		return marshalGeneratorResponse(ffiGeneratorResponseFromParseError(err))
 	}
 
+	if blocked := a.checkSchemaTrustGate(strings.TrimSpace(req.ConnectionID)); blocked != nil {
+		return marshalGeneratorResponse(blocked)
+	}
+
 	// 解析 generator_opts
 	opts := make(map[string]interface{})
 	if req.GeneratorOpts != "" {
@@ -449,6 +483,8 @@ func (a *GeneratorFFIAdapter) GetFieldGeneratorConfigJSON(reqJSON string) string
 		return marshalGeneratorResponse(ffiGeneratorResponseFromParseError(err))
 	}
 
+	trustWarning := a.schemaTrustWarning(strings.TrimSpace(req.ConnectionID))
+
 	config, err := a.configRepo.GetByField(context.Background(), req.ConnectionID, req.Table, req.Column)
 	if err != nil {
 		return marshalGeneratorResponse(ffiGeneratorResponseFromError(
@@ -478,7 +514,7 @@ func (a *GeneratorFFIAdapter) GetFieldGeneratorConfigJSON(reqJSON string) string
 				ConfigVersion:  config.ConfigVersion,
 				ModifiedSource: config.ModifiedSource,
 			},
-			Warnings: []FFIWarning{},
+			Warnings: trustWarning,
 		},
 	}
 
@@ -496,6 +532,10 @@ func (a *GeneratorFFIAdapter) PreviewGenerationJSON(reqJSON string) string {
 	var req PreviewGenerationRequest
 	if err := json.Unmarshal([]byte(reqJSON), &req); err != nil {
 		return marshalGeneratorResponse(ffiGeneratorResponseFromParseError(err))
+	}
+
+	if blocked := a.checkSchemaTrustGate(strings.TrimSpace(req.ConnectionID)); blocked != nil {
+		return marshalGeneratorResponse(blocked)
 	}
 
 	// 检查跨表请求（5.2）
@@ -585,6 +625,10 @@ func (a *GeneratorFFIAdapter) GetFieldGeneratorCandidatesJSON(reqJSON string) st
 		return marshalGeneratorResponse(ffiGeneratorResponseFromParseError(err))
 	}
 
+	if blocked := a.checkSchemaTrustGate(strings.TrimSpace(req.ConnectionID)); blocked != nil {
+		return marshalGeneratorResponse(blocked)
+	}
+
 	// 获取字段 schema
 	fieldSchema, err := a.schemaProvider.GetFieldSchema(context.Background(), req.ConnectionID, req.Table, req.Column)
 	if err != nil {
@@ -640,6 +684,10 @@ func (a *GeneratorFFIAdapter) ValidateFieldGeneratorConfigJSON(reqJSON string) s
 	var req ValidateFieldGeneratorConfigRequest
 	if err := json.Unmarshal([]byte(reqJSON), &req); err != nil {
 		return marshalGeneratorResponse(ffiGeneratorResponseFromParseError(err))
+	}
+
+	if blocked := a.checkSchemaTrustGate(strings.TrimSpace(req.ConnectionID)); blocked != nil {
+		return marshalGeneratorResponse(blocked)
 	}
 
 	// 获取字段 schema
@@ -774,17 +822,24 @@ func (a *GeneratorFFIAdapter) saveFieldConfig(ctx context.Context, req generator
 // ===== 转换函数 =====
 
 func convertPreviewMetadata(meta generator.PreviewMetadata) PreviewMetadataData {
+	paramsSummary := meta.ParamsSummary
+	if paramsSummary == nil {
+		paramsSummary = map[string]interface{}{}
+	}
 	return PreviewMetadataData{
 		Scope: PreviewScopeData{
 			Type:   string(meta.Scope.Type),
 			Table:  meta.Scope.Table,
 			Column: meta.Scope.Column,
 		},
+		GeneratorType: string(meta.GeneratorType),
+		ParamsSummary: paramsSummary,
 		SampleSize:     meta.SampleSize,
 		Seed:           meta.Seed,
 		GeneratedAt:    meta.GeneratedAt.Format(time.RFC3339),
 		Deterministic:  meta.Deterministic,
 		PartialSuccess: meta.PartialSuccess,
+		SeedSource:     meta.SeedSource,
 	}
 }
 
@@ -806,12 +861,22 @@ func convertPreviewFieldResults(results []generator.PreviewFieldResult) []Previe
 	}
 	out := make([]PreviewFieldResultData, len(results))
 	for i, r := range results {
+		var errCodePtr *string
+		if strings.TrimSpace(r.ErrorCode) != "" {
+			tmp := r.ErrorCode
+			errCodePtr = &tmp
+		}
+		var warningPtr *string
+		if strings.TrimSpace(r.Warning) != "" {
+			tmp := r.Warning
+			warningPtr = &tmp
+		}
 		out[i] = PreviewFieldResultData{
 			Field:       r.Field,
 			Status:      r.Status,
 			SampleCount: r.SampleCount,
-			ErrorCode:   r.ErrorCode,
-			Warning:     r.Warning,
+			ErrorCode:   errCodePtr,
+			Warning:     warningPtr,
 		}
 	}
 	return out
@@ -955,4 +1020,76 @@ func marshalGeneratorResponse(resp *FFIResponse) string {
 		return "{\"ok\":false,\"error\":{\"code\":\"INTERNAL\",\"message\":\"response serialization failed\"}}"
 	}
 	return string(b)
+}
+
+// checkSchemaTrustGate 检查 schema trust 门禁；被阻断时返回失败响应，否则返回 nil。
+func (a *GeneratorFFIAdapter) checkSchemaTrustGate(connectionID string) *FFIResponse {
+	if a == nil || a.trustReader == nil {
+		return nil
+	}
+	view, err := a.trustReader.GetSchemaTrustState(connectionID)
+	if err != nil {
+		// trust 状态读取失败时，不冒进执行业务；按前置条件失败处理，避免基于不可信状态继续下游链路。
+		return &FFIResponse{
+			Ok: false,
+			Error: &FFIError{
+				Code:    string(generator.GeneratorErrFailedPrecondition),
+				Reason:  "SCHEMA_TRUST_STATE_UNAVAILABLE",
+				Message: "schema trust gate blocked",
+			},
+		}
+	}
+	switch view.State {
+	case schema.SchemaTrustPendingRescan:
+		return &FFIResponse{
+			Ok: false,
+			Error: &FFIError{
+				Code:    string(generator.GeneratorErrFailedPrecondition),
+				Reason:  generatorFFITrustReasonPendingRescan,
+				Message: "schema trust gate blocked",
+			},
+		}
+	case schema.SchemaTrustPendingAdjustment:
+		return &FFIResponse{
+			Ok: false,
+			Error: &FFIError{
+				Code:    string(generator.GeneratorErrFailedPrecondition),
+				Reason:  generatorFFITrustReasonPendingAdjustment,
+				Message: "schema trust gate blocked",
+			},
+		}
+	default:
+		return nil
+	}
+}
+
+// schemaTrustWarning 为 GetFieldGeneratorConfig 的只读例外构造 warnings[]。
+func (a *GeneratorFFIAdapter) schemaTrustWarning(connectionID string) []FFIWarning {
+	if a == nil || a.trustReader == nil {
+		return []FFIWarning{}
+	}
+	view, err := a.trustReader.GetSchemaTrustState(connectionID)
+	if err != nil {
+		return []FFIWarning{{
+			Code:    string(generator.GeneratorErrFailedPrecondition),
+			Reason:  "SCHEMA_TRUST_STATE_UNAVAILABLE",
+			Message: "schema trust state is unavailable",
+		}}
+	}
+	switch view.State {
+	case schema.SchemaTrustPendingRescan:
+		return []FFIWarning{{
+			Code:    string(generator.GeneratorErrFailedPrecondition),
+			Reason:  generatorFFITrustReasonPendingRescan,
+			Message: "schema trust gate blocked",
+		}}
+	case schema.SchemaTrustPendingAdjustment:
+		return []FFIWarning{{
+			Code:    string(generator.GeneratorErrFailedPrecondition),
+			Reason:  generatorFFITrustReasonPendingAdjustment,
+			Message: "schema trust gate blocked",
+		}}
+	default:
+		return []FFIWarning{}
+	}
 }

@@ -842,6 +842,64 @@ func TestPreviewExternalDependencyNotReady(t *testing.T) {
 	}
 }
 
+// TestPreviewComputedContextDependencyNotReady 测试计算字段上下文依赖未就绪（6.4，对齐 spec-09）。
+func TestPreviewComputedContextDependencyNotReady(t *testing.T) {
+	reg := NewGeneratorRegistry()
+	mustRegisterPreview(t, reg, NewStaticGenerator(GeneratorMeta{
+		Type:          GeneratorType("computed_context_generator"),
+		TypeTags:      []string{"supports:string", "requires_computed_context"},
+		Deterministic: false,
+	}))
+
+	repo := NewPreviewableConfigRepository()
+	_, _ = repo.UpsertFieldConfig(context.Background(), FieldGeneratorConfig{
+		ColumnSchemaID: "col-1",
+		ConnectionID:   "c1",
+		Table:          "users",
+		Column:         "computed_col",
+		GeneratorType:  GeneratorType("computed_context_generator"),
+		GeneratorOpts:  map[string]interface{}{},
+		IsEnabled:      true,
+	})
+
+	schemaProvider := NewPreviewableSchemaProvider([]FieldSchema{
+		{ConnectionID: "c1", Table: "users", Column: "computed_col", AbstractType: "string", ColumnID: "col-1"},
+	})
+
+	runtime := NewGeneratorRuntimeWithDependencyCheck(func(g Generator) (bool, string) {
+		meta := g.Meta()
+		for _, tag := range meta.TypeTags {
+			if tag == "requires_computed_context" {
+				return false, "computed context spec-09 not ready"
+			}
+		}
+		return true, ""
+	})
+
+	svc := NewGeneratorPreviewService(reg, repo, schemaProvider, runtime)
+
+	_, err := svc.PreviewGeneration(context.Background(), PreviewRequest{
+		ConnectionID: "c1",
+		Scope:        PreviewScopeField,
+		Table:        "users",
+		Column:       "computed_col",
+		SampleSize:   3,
+	})
+	if err == nil {
+		t.Fatalf("expected FAILED_PRECONDITION when computed context not ready")
+	}
+	gErr, ok := err.(*GeneratorError)
+	if !ok {
+		t.Fatalf("expected GeneratorError, got %T", err)
+	}
+	if gErr.Code != GeneratorErrFailedPrecondition {
+		t.Fatalf("expected FAILED_PRECONDITION, got %s", gErr.Code)
+	}
+	if !containsSubstring(gErr.Message, "spec-09") {
+		t.Fatalf("error message should mention spec-09: %s", gErr.Message)
+	}
+}
+
 // TestPreviewTableScopeExternalDependencyReturnsFieldResult 测试 table scope 下外部依赖失败返回 field_result。
 func TestPreviewTableScopeExternalDependencyReturnsFieldResult(t *testing.T) {
 	reg := NewGeneratorRegistry()

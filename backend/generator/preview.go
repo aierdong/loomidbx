@@ -91,6 +91,9 @@ type PreviewMetadata struct {
 	// GeneratorType 是使用的生成器类型（field scope 时）。
 	GeneratorType GeneratorType
 
+	// ParamsSummary 是参数摘要（按 scope 输出；field scope 必填，table scope 可为空对象）。
+	ParamsSummary map[string]interface{}
+
 	// SampleSize 是请求的样本数量。
 	SampleSize int
 
@@ -272,6 +275,8 @@ func (s *GeneratorPreviewService) previewFieldScope(ctx context.Context, req Pre
 	meta := generator.Meta()
 	deterministic := effectiveSeed != nil && meta.Deterministic
 
+	paramsSummary := buildPreviewParamsSummary(config)
+
 	result := &PreviewResult{
 		Scope: PreviewScope{
 			Type:   PreviewScopeField,
@@ -286,6 +291,7 @@ func (s *GeneratorPreviewService) previewFieldScope(ctx context.Context, req Pre
 				Column: req.Column,
 			},
 			GeneratorType: config.GeneratorType,
+			ParamsSummary: paramsSummary,
 			SampleSize:    req.SampleSize,
 			Seed:          seedToInt64(effectiveSeed),
 			Deterministic: deterministic,
@@ -442,6 +448,11 @@ func (s *GeneratorPreviewService) previewTableScope(ctx context.Context, req Pre
 		}
 	}
 
+	seedSource := "none"
+	if req.Seed != nil {
+		seedSource = "preview_override"
+	}
+
 	result := &PreviewResult{
 		Scope: PreviewScope{
 			Type:  PreviewScopeTable,
@@ -453,17 +464,56 @@ func (s *GeneratorPreviewService) previewTableScope(ctx context.Context, req Pre
 				Type:  PreviewScopeTable,
 				Table: req.Table,
 			},
+			GeneratorType: "",
+			ParamsSummary: map[string]interface{}{},
 			SampleSize:     req.SampleSize,
 			Seed:           seedToInt64(req.Seed),
 			Deterministic:  deterministic,
 			GeneratedAt:    time.Now().UTC(),
 			PartialSuccess: hasSuccess && hasFailure,
+			SeedSource:     seedSource,
 		},
 		Warnings:     warnings,
 		FieldResults: fieldResults,
 	}
 
 	return result, nil
+}
+
+// buildPreviewParamsSummary 构建预览 metadata 中的参数摘要（脱敏后）。
+func buildPreviewParamsSummary(config FieldGeneratorConfig) map[string]interface{} {
+	summary := map[string]interface{}{}
+
+	// 预览返回的参数摘要应可用于 UI 展示，但不得泄露敏感信息。
+	summary["generator_opts"] = sanitizeGeneratorOptsForPreview(cloneMap(config.GeneratorOpts))
+
+	seedMode := ""
+	if config.SeedPolicy != nil {
+		if m, ok := config.SeedPolicy["mode"].(string); ok {
+			seedMode = strings.TrimSpace(m)
+		}
+	}
+	summary["seed_policy_mode"] = seedMode
+
+	summary["null_policy"] = strings.TrimSpace(config.NullPolicy)
+
+	return summary
+}
+
+// sanitizeGeneratorOptsForPreview 对 generator_opts 做脱敏处理，用于预览参数摘要输出。
+func sanitizeGeneratorOptsForPreview(opts map[string]interface{}) map[string]interface{} {
+	if opts == nil {
+		return map[string]interface{}{}
+	}
+
+	// 预览链路允许展示参数结构，但必须屏蔽潜在敏感字段。
+	sensitiveKeys := []string{"api_key", "token", "password", "secret", "credential"}
+	for _, key := range sensitiveKeys {
+		if _, ok := opts[key]; ok {
+			opts[key] = "***"
+		}
+	}
+	return opts
 }
 
 // resolveEffectiveSeed 计算生效种子与来源。

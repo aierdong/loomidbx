@@ -8,6 +8,7 @@ import (
 
 	"loomidbx/ffi"
 	"loomidbx/generator"
+	"loomidbx/schema"
 )
 
 // TestGeneratorFFISaveFieldGeneratorConfigStructure 测试保存配置的 JSON 结构。
@@ -198,6 +199,125 @@ func TestGeneratorFFIPreviewGenerationFieldScopeStructure(t *testing.T) {
 	// 验证 warnings
 	if data["warnings"] == nil {
 		t.Fatalf("expected warnings array")
+	}
+}
+
+// TestGeneratorFFIPreviewMetadata_MinContract_FieldScope 测试 preview metadata 最小契约（4.7，field scope）。
+func TestGeneratorFFIPreviewMetadata_MinContract_FieldScope(t *testing.T) {
+	adapter := newGeneratorAdapter(t)
+
+	adapter.SaveFieldGeneratorConfigJSON(`{
+		"connection_id": "c1",
+		"table": "users",
+		"column": "name",
+		"generator_type": "string_random_chars",
+		"generator_opts": "{\"length\":8,\"token\":\"secret\"}",
+		"seed_policy": "{\"mode\":\"inherit_global\"}",
+		"null_policy": "respect_nullable",
+		"is_enabled": true,
+		"modified_source": "ui_manual"
+	}`)
+
+	resp := adapter.PreviewGenerationJSON(`{
+		"connection_id": "c1",
+		"scope": {"type": "field", "table": "users", "column": "name"},
+		"sample_size": 2,
+		"seed": 42
+	}`)
+
+	var ffiResp ffi.FFIResponse
+	if err := json.Unmarshal([]byte(resp), &ffiResp); err != nil {
+		t.Fatalf("parse response failed: %v", err)
+	}
+	if !ffiResp.Ok {
+		t.Fatalf("expected ok=true, got: %s", resp)
+	}
+	data := ffiResp.Data.(map[string]interface{})
+
+	metadata, ok := data["metadata"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected metadata object, got: %T", data["metadata"])
+	}
+
+	// 4.7 最小字段契约：generator_type / 参数摘要 / deterministic / warnings 相关元信息
+	if metadata["generator_type"] != "string_random_chars" {
+		t.Fatalf("expected metadata.generator_type=string_random_chars, got: %v", metadata["generator_type"])
+	}
+	if metadata["deterministic"] != true {
+		t.Fatalf("expected metadata.deterministic=true")
+	}
+	if metadata["seed"] != float64(42) {
+		t.Fatalf("expected metadata.seed=42")
+	}
+	if metadata["seed_source"] == nil {
+		t.Fatalf("expected metadata.seed_source")
+	}
+	if metadata["params_summary"] == nil {
+		t.Fatalf("expected metadata.params_summary")
+	}
+	if _, ok := metadata["params_summary"].(map[string]interface{}); !ok {
+		t.Fatalf("expected params_summary as object, got: %T", metadata["params_summary"])
+	}
+}
+
+// TestGeneratorFFIPreviewMetadata_MinContract_TableScope 测试 preview metadata 最小契约（4.7，table scope）。
+func TestGeneratorFFIPreviewMetadata_MinContract_TableScope(t *testing.T) {
+	adapter := newGeneratorAdapter(t)
+
+	adapter.SaveFieldGeneratorConfigJSON(`{
+		"connection_id": "c1",
+		"table": "users",
+		"column": "id",
+		"generator_type": "int_range_random",
+		"generator_opts": "{}",
+		"is_enabled": true,
+		"modified_source": "ui_manual"
+	}`)
+	adapter.SaveFieldGeneratorConfigJSON(`{
+		"connection_id": "c1",
+		"table": "users",
+		"column": "name",
+		"generator_type": "string_random_chars",
+		"generator_opts": "{}",
+		"is_enabled": true,
+		"modified_source": "ui_manual"
+	}`)
+
+	resp := adapter.PreviewGenerationJSON(`{
+		"connection_id": "c1",
+		"scope": {"type": "table", "table": "users"},
+		"sample_size": 2,
+		"seed": 123
+	}`)
+
+	var ffiResp ffi.FFIResponse
+	if err := json.Unmarshal([]byte(resp), &ffiResp); err != nil {
+		t.Fatalf("parse response failed: %v", err)
+	}
+	if !ffiResp.Ok {
+		t.Fatalf("expected ok=true, got: %s", resp)
+	}
+	data := ffiResp.Data.(map[string]interface{})
+
+	metadata, ok := data["metadata"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected metadata object")
+	}
+	if metadata["deterministic"] == nil {
+		t.Fatalf("expected metadata.deterministic")
+	}
+	if metadata["seed"] != float64(123) {
+		t.Fatalf("expected metadata.seed=123")
+	}
+	if metadata["seed_source"] == nil {
+		t.Fatalf("expected metadata.seed_source")
+	}
+	// table scope 下 generator_type 允许为空字符串，但字段必须存在，避免调用方依赖隐式字段。
+	if _, ok := metadata["generator_type"]; !ok {
+		t.Fatalf("expected metadata.generator_type key to exist")
+	}
+	if metadata["params_summary"] == nil {
+		t.Fatalf("expected metadata.params_summary")
 	}
 }
 
@@ -554,9 +674,11 @@ func TestGeneratorFFIValidateFieldGeneratorConfigInvalidStructure(t *testing.T) 
 	reqJSON := `{
 		"connection_id": "c1",
 		"draft_config": {
-			"table": "",
+			"table": "users",
 			"column": "name",
-			"generator_type": "unknown_generator",
+			"generator_type": "string_random_chars",
+			"generator_opts": "{}",
+			"is_enabled": true,
 			"modified_source": "invalid_source"
 		}
 	}`
@@ -583,6 +705,7 @@ func TestGeneratorFFIValidateFieldGeneratorConfigInvalidStructure(t *testing.T) 
 	}
 
 	// 验证错误结构
+	foundModifiedSource := false
 	for _, e := range errors {
 		err := e.(map[string]interface{})
 		if err["code"] == nil {
@@ -594,6 +717,12 @@ func TestGeneratorFFIValidateFieldGeneratorConfigInvalidStructure(t *testing.T) 
 		if err["message"] == nil {
 			t.Fatalf("expected message in each error")
 		}
+		if err["path"] == "modified_source" {
+			foundModifiedSource = true
+		}
+	}
+	if !foundModifiedSource {
+		t.Fatalf("expected modified_source validation error path")
 	}
 }
 
@@ -780,6 +909,13 @@ func TestPreviewTablePartialSuccessContractV1(t *testing.T) {
 		if result["sample_count"] == nil {
 			t.Fatalf("field_result missing sample_count")
 		}
+		// 契约要求 error_code / warning 字段存在（可为 null）
+		if _, ok := result["error_code"]; !ok {
+			t.Fatalf("field_result missing error_code key")
+		}
+		if _, ok := result["warning"]; !ok {
+			t.Fatalf("field_result missing warning key")
+		}
 	}
 
 	// 验证 status=ok 字段与 samples 字段集合一致
@@ -796,6 +932,170 @@ func TestPreviewTablePartialSuccessContractV1(t *testing.T) {
 	}
 	if len(okFields) != len(sampleFields) {
 		t.Fatalf("ok fields count mismatch samples fields: %d vs %d", len(okFields), len(sampleFields))
+	}
+}
+
+// TestGeneratorFFISchemaTrustGate_Trusted 测试 schema trust=trusted 时核心接口成功路径结构稳定（6.7）。
+func TestGeneratorFFISchemaTrustGate_Trusted(t *testing.T) {
+	deps := newGeneratorAdapterDeps(t)
+	adapter := newGeneratorAdapterWithTrustDeps(t, schema.SchemaTrustTrusted, deps)
+
+	saveResp := adapter.SaveFieldGeneratorConfigJSON(`{
+		"connection_id": "c1",
+		"table": "users",
+		"column": "name",
+		"generator_type": "string_random_chars",
+		"generator_opts": "{}",
+		"is_enabled": true,
+		"modified_source": "ui_manual"
+	}`)
+	assertFFIOK(t, saveResp)
+
+	validateResp := adapter.ValidateFieldGeneratorConfigJSON(`{
+		"connection_id": "c1",
+		"draft_config": {
+			"table": "users",
+			"column": "name",
+			"generator_type": "string_random_chars",
+			"generator_opts": "{}",
+			"is_enabled": true,
+			"modified_source": "ui_manual"
+		}
+	}`)
+	assertFFIOK(t, validateResp)
+
+	candidatesResp := adapter.GetFieldGeneratorCandidatesJSON(`{"connection_id":"c1","table":"users","column":"name"}`)
+	assertFFIOK(t, candidatesResp)
+
+	previewResp := adapter.PreviewGenerationJSON(`{
+		"connection_id": "c1",
+		"scope": {"type": "field", "table": "users", "column": "name"},
+		"sample_size": 2,
+		"seed": 42
+	}`)
+	assertFFIOK(t, previewResp)
+
+	getResp := adapter.GetFieldGeneratorConfigJSON(`{"connection_id":"c1","table":"users","column":"name"}`)
+	assertFFIOK(t, getResp)
+}
+
+// TestGeneratorFFISchemaTrustGate_PendingRescan 测试 pending_rescan 门禁失败/只读例外（6.8）。
+func TestGeneratorFFISchemaTrustGate_PendingRescan(t *testing.T) {
+	deps := newGeneratorAdapterDeps(t)
+
+	blocked := newGeneratorAdapterWithTrustDeps(t, schema.SchemaTrustPendingRescan, deps)
+
+	assertFFITrustBlocked(t, blocked.SaveFieldGeneratorConfigJSON(`{
+		"connection_id": "c1",
+		"table": "users",
+		"column": "name",
+		"generator_type": "string_random_chars",
+		"generator_opts": "{}",
+		"is_enabled": true,
+		"modified_source": "ui_manual"
+	}`), "SCHEMA_TRUST_PENDING_RESCAN")
+
+	assertFFITrustBlocked(t, blocked.ValidateFieldGeneratorConfigJSON(`{
+		"connection_id": "c1",
+		"draft_config": {
+			"table": "users",
+			"column": "name",
+			"generator_type": "string_random_chars",
+			"generator_opts": "{}",
+			"is_enabled": true,
+			"modified_source": "ui_manual"
+		}
+	}`), "SCHEMA_TRUST_PENDING_RESCAN")
+
+	assertFFITrustBlocked(t, blocked.GetFieldGeneratorCandidatesJSON(`{"connection_id":"c1","table":"users","column":"name"}`), "SCHEMA_TRUST_PENDING_RESCAN")
+
+	assertFFITrustBlocked(t, blocked.PreviewGenerationJSON(`{
+		"connection_id": "c1",
+		"scope": {"type": "table", "table": "users"},
+		"sample_size": 2
+	}`), "SCHEMA_TRUST_PENDING_RESCAN")
+
+	// 只读例外：先写入配置，再用 pending_rescan 适配器读取，必须 ok=true 且 warnings[].reason 正确
+	writer := newGeneratorAdapterWithTrustDeps(t, schema.SchemaTrustTrusted, deps)
+	writer.SaveFieldGeneratorConfigJSON(`{
+		"connection_id": "c1",
+		"table": "users",
+		"column": "name",
+		"generator_type": "string_random_chars",
+		"generator_opts": "{}",
+		"is_enabled": true,
+		"modified_source": "ui_manual"
+	}`)
+
+	getResp := blocked.GetFieldGeneratorConfigJSON(`{"connection_id":"c1","table":"users","column":"name"}`)
+	assertFFIOK(t, getResp)
+	assertFFIDataWarningsHasReason(t, getResp, "SCHEMA_TRUST_PENDING_RESCAN")
+}
+
+// TestGeneratorFFISchemaTrustGate_PendingAdjustment 测试 pending_adjustment 门禁失败/只读例外（6.9）。
+func TestGeneratorFFISchemaTrustGate_PendingAdjustment(t *testing.T) {
+	deps := newGeneratorAdapterDeps(t)
+
+	blocked := newGeneratorAdapterWithTrustDeps(t, schema.SchemaTrustPendingAdjustment, deps)
+
+	assertFFITrustBlocked(t, blocked.SaveFieldGeneratorConfigJSON(`{
+		"connection_id": "c1",
+		"table": "users",
+		"column": "name",
+		"generator_type": "string_random_chars",
+		"generator_opts": "{}",
+		"is_enabled": true,
+		"modified_source": "ui_manual"
+	}`), "SCHEMA_TRUST_PENDING_ADJUSTMENT")
+
+	assertFFITrustBlocked(t, blocked.ValidateFieldGeneratorConfigJSON(`{
+		"connection_id": "c1",
+		"draft_config": {
+			"table": "users",
+			"column": "name",
+			"generator_type": "string_random_chars",
+			"generator_opts": "{}",
+			"is_enabled": true,
+			"modified_source": "ui_manual"
+		}
+	}`), "SCHEMA_TRUST_PENDING_ADJUSTMENT")
+
+	assertFFITrustBlocked(t, blocked.GetFieldGeneratorCandidatesJSON(`{"connection_id":"c1","table":"users","column":"name"}`), "SCHEMA_TRUST_PENDING_ADJUSTMENT")
+
+	assertFFITrustBlocked(t, blocked.PreviewGenerationJSON(`{
+		"connection_id": "c1",
+		"scope": {"type": "field", "table": "users", "column": "name"},
+		"sample_size": 2,
+		"seed": 42
+	}`), "SCHEMA_TRUST_PENDING_ADJUSTMENT")
+
+	writer := newGeneratorAdapterWithTrustDeps(t, schema.SchemaTrustTrusted, deps)
+	writer.SaveFieldGeneratorConfigJSON(`{
+		"connection_id": "c1",
+		"table": "users",
+		"column": "name",
+		"generator_type": "string_random_chars",
+		"generator_opts": "{}",
+		"is_enabled": true,
+		"modified_source": "ui_manual"
+	}`)
+
+	getResp := blocked.GetFieldGeneratorConfigJSON(`{"connection_id":"c1","table":"users","column":"name"}`)
+	assertFFIOK(t, getResp)
+	assertFFIDataWarningsHasReason(t, getResp, "SCHEMA_TRUST_PENDING_ADJUSTMENT")
+}
+
+// TestGeneratorFFISchemaTrustGate_ListCapabilitiesAlwaysOK 测试 ListGeneratorCapabilities 在三种状态下结构稳定且不被门禁阻断（6.10）。
+func TestGeneratorFFISchemaTrustGate_ListCapabilitiesAlwaysOK(t *testing.T) {
+	deps := newGeneratorAdapterDeps(t)
+	for _, st := range []schema.SchemaTrustState{
+		schema.SchemaTrustTrusted,
+		schema.SchemaTrustPendingRescan,
+		schema.SchemaTrustPendingAdjustment,
+	} {
+		adapter := newGeneratorAdapterWithTrustDeps(t, st, deps)
+		resp := adapter.ListGeneratorCapabilitiesJSON(`{}`)
+		assertFFIOK(t, resp)
 	}
 }
 
@@ -825,7 +1125,116 @@ func newGeneratorAdapter(t *testing.T) *ffi.GeneratorFFIAdapter {
 		{ConnectionID: "c1", Table: "users", Column: "phone", AbstractType: "string", ColumnID: "col-phone"},
 	})
 
-	return ffi.NewGeneratorFFIAdapter(reg, configRepo, schemaProvider, generator.NewGeneratorRuntime())
+	return ffi.NewGeneratorFFIAdapter(reg, configRepo, schemaProvider, generator.NewGeneratorRuntime(), nil)
+}
+
+type generatorAdapterDeps struct {
+	reg            *generator.GeneratorRegistry
+	configRepo     *generator.PreviewableConfigRepository
+	schemaProvider *generator.PreviewableSchemaProvider
+}
+
+func newGeneratorAdapterDeps(t *testing.T) generatorAdapterDeps {
+	t.Helper()
+	reg := generator.NewGeneratorRegistry()
+	reg.Register(generator.NewStaticGenerator(generator.GeneratorMeta{
+		Type:          generator.GeneratorTypeIntRangeRandom,
+		TypeTags:      []string{"supports:int"},
+		Deterministic: true,
+	}))
+	reg.Register(generator.NewStaticGenerator(generator.GeneratorMeta{
+		Type:          generator.GeneratorTypeStringRandomChars,
+		TypeTags:      []string{"supports:string"},
+		Deterministic: true,
+	}))
+	configRepo := generator.NewPreviewableConfigRepository()
+	schemaProvider := generator.NewPreviewableSchemaProvider([]generator.FieldSchema{
+		{ConnectionID: "c1", Table: "users", Column: "id", AbstractType: "int", ColumnID: "col-id"},
+		{ConnectionID: "c1", Table: "users", Column: "name", AbstractType: "string", ColumnID: "col-name"},
+		{ConnectionID: "c1", Table: "users", Column: "email", AbstractType: "string", ColumnID: "col-email"},
+		{ConnectionID: "c1", Table: "users", Column: "phone", AbstractType: "string", ColumnID: "col-phone"},
+	})
+	return generatorAdapterDeps{
+		reg:            reg,
+		configRepo:     configRepo,
+		schemaProvider: schemaProvider,
+	}
+}
+
+type fakeGeneratorTrustReader struct {
+	view schema.TrustStateView
+	err  error
+}
+
+func (f *fakeGeneratorTrustReader) GetSchemaTrustState(_ string) (schema.TrustStateView, error) {
+	return f.view, f.err
+}
+
+func newGeneratorAdapterWithTrustDeps(t *testing.T, trustState schema.SchemaTrustState, deps generatorAdapterDeps) *ffi.GeneratorFFIAdapter {
+	t.Helper()
+	trustReader := &fakeGeneratorTrustReader{view: schema.TrustStateView{State: trustState}}
+	return ffi.NewGeneratorFFIAdapter(deps.reg, deps.configRepo, deps.schemaProvider, generator.NewGeneratorRuntime(), trustReader)
+}
+
+func assertFFIOK(t *testing.T, resp string) {
+	t.Helper()
+	var parsed map[string]interface{}
+	if err := json.Unmarshal([]byte(resp), &parsed); err != nil {
+		t.Fatalf("parse response failed: %v", err)
+	}
+	if parsed["ok"] != true {
+		t.Fatalf("expected ok=true, got %s", resp)
+	}
+	if parsed["error"] != nil {
+		t.Fatalf("expected error=nil, got %s", resp)
+	}
+}
+
+func assertFFITrustBlocked(t *testing.T, resp string, reason string) {
+	t.Helper()
+	var parsed map[string]interface{}
+	if err := json.Unmarshal([]byte(resp), &parsed); err != nil {
+		t.Fatalf("parse response failed: %v", err)
+	}
+	if parsed["ok"] != false {
+		t.Fatalf("expected ok=false, got %s", resp)
+	}
+	errObj, ok := parsed["error"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected error object, got %s", resp)
+	}
+	if errObj["code"] != "FAILED_PRECONDITION" {
+		t.Fatalf("expected FAILED_PRECONDITION, got %v", errObj["code"])
+	}
+	if errObj["reason"] != reason {
+		t.Fatalf("expected reason=%s, got %v", reason, errObj["reason"])
+	}
+}
+
+func assertFFIDataWarningsHasReason(t *testing.T, resp string, reason string) {
+	t.Helper()
+	var parsed map[string]interface{}
+	if err := json.Unmarshal([]byte(resp), &parsed); err != nil {
+		t.Fatalf("parse response failed: %v", err)
+	}
+	data := parsed["data"].(map[string]interface{})
+	warnings, ok := data["warnings"].([]interface{})
+	if !ok {
+		t.Fatalf("expected warnings array, got %s", resp)
+	}
+	found := false
+	for _, w := range warnings {
+		m, ok := w.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if m["reason"] == reason {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected warnings contain reason=%s, got %s", reason, resp)
+	}
 }
 
 func containsSubstring(s, substr string) bool {

@@ -32,6 +32,9 @@ type FFIError struct {
 	// Code 为稳定错误码，供 Flutter 做分支处理。
 	Code string `json:"code"`
 
+	// Reason 为可机器判定的稳定原因码（可选）。
+	Reason string `json:"reason,omitempty"`
+
 	// Message 为可读错误描述，不含敏感明文。
 	Message string `json:"message"`
 
