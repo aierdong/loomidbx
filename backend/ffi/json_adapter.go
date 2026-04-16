@@ -105,6 +105,9 @@ func (a *FFIAdapter) SaveConnectionJSON(reqJSON string) string {
 
 // ListConnectionsJSON 列出所有连接并返回 FFI JSON 响应。
 //
+// 输入：
+// - 无。
+//
 // 输出：
 // - string: FFI JSON 响应（{"ok": true, "data": [ConnectionSummary...]}）。
 //
@@ -148,6 +151,12 @@ func (a *FFIAdapter) DeleteConnectionJSON(reqJSON string) string {
 }
 
 // ffiResponseFromAppError 将应用层错误转换为 FFI 响应。
+//
+// 输入：
+// - err: 应用层结构化错误对象。
+//
+// 输出：
+// - *FFIResponse: 转换后的 FFI 错误响应。
 func ffiResponseFromAppError(err *app.AppError) *FFIResponse {
 	return &FFIResponse{
 		Ok: false,
@@ -160,6 +169,12 @@ func ffiResponseFromAppError(err *app.AppError) *FFIResponse {
 }
 
 // ffiResponseFromParseError 将 JSON 解析错误转换为 FFI 响应。
+//
+// 输入：
+// - err: JSON 解析错误对象。
+//
+// 输出：
+// - *FFIResponse: 转换后的 FFI 错误响应。
 func ffiResponseFromParseError(err error) *FFIResponse {
 	return &FFIResponse{
 		Ok: false,
@@ -172,6 +187,12 @@ func ffiResponseFromParseError(err error) *FFIResponse {
 }
 
 // marshalResponse 将 FFI 响应序列化为 JSON 字串。
+//
+// 输入：
+// - resp: 待序列化的 FFI 响应对象。
+//
+// 输出：
+// - string: 序列化后的 JSON 字串；若失败则返回最小错误响应。
 func marshalResponse(resp *FFIResponse) string {
 	b, err := json.Marshal(resp)
 	if err != nil {

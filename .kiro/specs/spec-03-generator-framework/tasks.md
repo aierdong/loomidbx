@@ -2,57 +2,45 @@
 
 ## Tasks
 
-- [ ] 1. 建立生成器抽象、注册中心与能力声明模型
-- [ ] 1.1 定义统一 `Generator` 接口与标准上下文/返回值对象（含错误分类）。
-<<<<<<< HEAD
+- [x] 1. 建立生成器抽象、注册中心与能力声明模型
+- [x] 1.1 定义统一 `Generator` 接口与标准上下文/返回值对象（含错误分类）。
   - 覆盖生成器元信息、能力标签与类型语义。
   - _Requirements: 1.1, 1.4_
-- [ ] 1.2 实现 `GeneratorRegistry`，支持注册、查询、重复冲突检测。
+- [x] 1.2 实现 `GeneratorRegistry`，支持注册、查询、重复冲突检测。
   - 对同一 `generator_type` 的重复注册返回稳定错误码。
-=======
-  - 覆盖生成器元信息与能力标签语义。
-  - _Requirements: 1.1, 1.4_
-- [ ] 1.2 实现 `GeneratorRegistry`，支持注册、查询、重复冲突检测。
-  - 对不兼容重复注册返回稳定错误码。
->>>>>>> b7aedc3 (docs(spec): refine spec-03 docs and add batch templates)
   - _Requirements: 1.2, 1.3_
-- [ ] 1.3 构建能力查询接口，支持按字段类型/能力标签筛选生成器。
+- [x] 1.3 构建能力查询接口，支持按字段类型/能力标签筛选生成器。
   - 供 UI/FFI 与下游执行层复用。
   - _Requirements: 1.4_
 
-- [ ] 2. 实现字段类型映射与候选生成器解析
-- [ ] 2.1 建立 MVP 基础类型到默认生成器的映射规则。
+- [x] 2. 实现字段类型映射与候选生成器解析
+- [x] 2.1 建立 MVP 基础类型到默认生成器的映射规则。
   - 覆盖字符串、整数、浮点、布尔、日期时间、枚举/集合类。
   - _Requirements: 2.1_
-- [ ] 2.2 实现 `GeneratorTypeResolver`，按最新 schema 解析候选集与默认项。
+- [x] 2.2 实现 `GeneratorTypeResolver`，按最新 schema 解析候选集与默认项。
   - 支持 schema 变化后重计算候选列表。
   - _Requirements: 2.2, 2.3_
-- [ ] 2.3 对“无可用生成器”场景返回可定位错误与建议动作。
+- [x] 2.3 对“无可用生成器”场景返回可定位错误与建议动作。
   - 输出字段标识、字段类型、推荐下一步。
   - _Requirements: 2.4_
-- [ ] 2.4 实现通用 `ENUM` 候选值生成器（`EnumValueGenerator`）及参数模型。
+- [x] 2.4 实现通用 `ENUM` 候选值生成器（`EnumValueGenerator`）及参数模型。
   - 支持不同字段类型使用对应类型候选集合（如整型候选、字符串候选）。
   - _Requirements: 2.5_
-- [ ] 2.5 固化 MVP 默认生成器映射表（抽象类型 -> 默认生成器）并暴露可查询结果。
+- [x] 2.5 固化 MVP 默认生成器映射表（抽象类型 -> 默认生成器）并暴露可查询结果。
   - 至少覆盖 `int/decimal/string/boolean/datetime` 的默认项，供候选解析与 UI 初始建议复用。
   - _Requirements: 2.6_
 
 - [ ] 3. 实现字段级配置模型、校验与存储接口
-<<<<<<< HEAD
-- [ ] 3.1 设计字段配置数据结构（`generator_type`、参数、空值策略、种子策略、启用状态）。
+- [x] 3.1 设计字段配置数据结构（`generator_type`、参数、空值策略、种子策略、启用状态）。
   - 明确请求定位键（`connection_id + table + column`）与持久化唯一键（`column_schema_id`）映射关系，以及配置版本字段。
-=======
-- [ ] 3.1 设计字段配置数据结构（生成器 ID、参数、空值策略、种子策略、启用状态）。
-  - 明确连接/表/字段维度主键与配置修订号字段。
->>>>>>> b7aedc3 (docs(spec): refine spec-03 docs and add batch templates)
   - _Requirements: 3.1_
-- [ ] 3.2 实现配置校验器（必填、类型、范围、schema 兼容性）。
+- [x] 3.2 实现配置校验器（必填、类型、范围、schema 兼容性）。
   - 对校验失败返回字段级错误路径与修复提示。
   - _Requirements: 3.2, 3.3_
-- [ ] 3.3 实现配置仓储接口与服务编排，支持按连接/表维度查询与更新。
+- [x] 3.3 实现配置仓储接口与服务编排，支持按连接/表维度查询与更新。
   - 服务层先将请求定位键解析为 `column_schema_id`，仓储层严格基于 `column_schema_id` upsert；保留最小必要审计信息（更新时间、修改来源）。
   - _Requirements: 3.4_
-- [ ] 3.4 为字段配置增加 `modified_source` 固定枚举校验与存储约束。
+- [x] 3.4 为字段配置增加 `modified_source` 固定枚举校验与存储约束。
   - 非法枚举值拒绝保存，并返回字段级错误路径。
   - _Requirements: 3.5_
 - [ ] 3.5 实现 Schema Trust 门禁服务编排（含只读例外）。

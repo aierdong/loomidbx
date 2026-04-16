@@ -235,7 +235,6 @@ Next Steps:
 这两处就是上一轮评审的关键 NO-GO 项，现在已修复。
 你可以直接再跑一次 `/validate-design spec-03-generator-framework`。
 
-<<<<<<< HEAD
 
 
 ---
@@ -408,7 +407,6 @@ Next Steps:
 
 另外我已做过一次文档诊断检查，当前无新增 linter 问题。
 如果你需要，我可以继续基于这个版本再跑一轮 `/validate-design spec-03-generator-framework` 的最终评审口径（只给结论和风险清单）。
-=======
 ---
 
 > 1. 首先需要把“生成器”的概念澄清并写入设计文档中：「生成器是一段生成单一/一组模拟数据的代码，它满足 Generator 接口。Generator 需要一个“配置”参数，例如“整数序列生成器”需要的配置是 {"start": 1, "step": 1}。系统有很多这样的生成器，例如随机字符串生成器，UUID 生成器等等。为了统一暴露、调用这些生成器，因此需要“Register” 作为统一管理，例如查询不同数据类型的字段可以使用哪些生成器。」。明确了生成器及Register的概念后，就知道 Issue 1 中：把生成器设计为一个“数据模型” 并且用 ldb_generator_definitions 持久化是一件非常可笑的事情。需要持久化的是用户传递的配置参数，例如为一个 ID 字段设置了generator_type=IntSequenceGenerator，参数= {"start": 1, "step": 1}
@@ -996,7 +994,6 @@ Next Steps: 直接进入实现或任务执行：`/kiro/spec-impl spec-03-generat
 > \- 下一批前置条件：<满足/不满足 + 原因>
 
 
->>>>>>> b7aedc3 (docs(spec): refine spec-03 docs and add batch templates)
 
 
 
