@@ -14,7 +14,7 @@ type: reference
 
 ## 架构决策（必须遵守）
 
-- 统一接口：`Generate(ctx)`、`GenerateBatch(ctx, count)`、`Reset()`、`Type()`。
+- 统一接口：`Meta()`、`Generate(ctx, in)`、`GenerateBatch(ctx, in, count)`、`Reset()`。
 - 主流程采用对象式生成器实例；`Preview(config, n)` 仅作为预览语法糖。
 - 公共配置在生成器配置中显式声明，不从 Schema 隐式推断（扫描时可建议，但需用户确认）。
 - Go 侧采用组合模式：具体生成器嵌入 `BaseGenerator` 复用公共处理。

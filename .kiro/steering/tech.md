@@ -56,10 +56,10 @@ type Connector interface {
 // Generator 接口
 // 完整定义见 ./generator.md
 type Generator interface {
-    Generate(ctx context.Context) (interface{}, error)
-    GenerateBatch(ctx context.Context, count int) ([]interface{}, error)
+    Meta() GeneratorMeta
+    Generate(ctx context.Context, in GeneratorContext) (interface{}, error)
+    GenerateBatch(ctx context.Context, in GeneratorContext, count int) ([]interface{}, error)
     Reset() error  // 用于有状态生成器（序列、自增），无状态生成器上为 no-op、不报错
-    Type() GeneratorType
 }
 ```
 

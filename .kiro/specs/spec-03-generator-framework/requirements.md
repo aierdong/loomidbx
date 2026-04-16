@@ -32,9 +32,18 @@
 
 1. The LoomiDBX Generator Framework shall 内置 MVP 必需的基础类型生成器映射（如字符串、整数、浮点、布尔、日期时间、枚举/集合类）。
 2. When 字段 schema 类型发生变化, the LoomiDBX Generator Framework shall 基于最新 schema 重新判定候选生成器集合，并输出不兼容提示。
-3. The LoomiDBX Generator Framework shall 支持“类型默认生成器 + 字段显式覆盖”的优先级策略，且行为可预测。
+3. The LoomiDBX Generator Framework shall 提供“按字段类型分配默认生成器（5 种抽象类型）+ 可按字段显式改配”的机制：扫描后先给出默认/推测结果（如 `name` 字段可推测为姓名生成器），用户可接受或调整，行为保持直观可理解。
 4. If 字段类型无可用生成器, the LoomiDBX Generator Framework shall 返回可定位错误（包含字段标识、类型与建议动作），不得静默降级为随机值。
 5. The LoomiDBX Generator Framework shall 提供通用 `ENUM` 候选值生成能力：允许配置候选集合（如 `[1,2,3]`、`["x","y","z"]`），并根据字段类型进行一致性约束。
+6. The LoomiDBX Generator Framework shall 提供并维护 MVP 默认生成器映射（抽象类型 → 默认 `generator_type`），作为自动分配的基线：
+
+   | 抽象类型 | 默认 `generator_type` |
+   | --- | --- |
+   | `int` | `int_range_random` |
+   | `decimal` | `decimal_range_random` |
+   | `string` | `string_random_chars` |
+   | `boolean` | `boolean_ratio` |
+   | `datetime` | `datetime_range_random` |
 
 ### Requirement 3: 字段级配置模型与校验
 
@@ -58,6 +67,9 @@
 2. When 预览请求包含固定种子, the LoomiDBX Generator Framework shall 在同一配置与输入上下文下返回可复现结果。
 3. The LoomiDBX Generator Framework shall 在预览响应中附带元数据（`generator_type`、参数摘要、是否确定性、警告信息）。
 4. If 生成器依赖外部 feed 或计算表达式但依赖未就绪, the LoomiDBX Generator Framework shall 返回 `FAILED_PRECONDITION` 类错误并指示对应上游依赖。
+5. When `scope=table` 预览中部分字段生成失败或被跳过, the LoomiDBX Generator Framework shall 返回稳定的“部分成功”结果：成功字段样本可返回，失败/跳过字段不得静默丢失。
+6. The LoomiDBX Generator Framework shall 在 `scope=table` 预览响应中提供字段级结果清单（至少包含 `field`、`status`=`ok|skipped|failed`、`error_code?`、`warning?`），以便调用方可预测地展示“哪些字段成功、哪些字段被跳过或失败”。
+7. The LoomiDBX Generator Framework shall 为 `scope=table` 预览提供并维护统一标识的标准契约样例 `PREVIEW_TABLE_PARTIAL_SUCCESS_V1`（定义于 `design.md`，含 `samples`、`metadata`、`warnings[]`、`field_results[]`），并明确 `field_results.status=ok` 的字段集合必须与 `samples` 返回字段一致，供前后端联调与契约测试复用。
 
 ### Requirement 5: 边界控制、安全与契约一致性
 
@@ -69,3 +81,4 @@
 2. If 外部调用请求涉及跨表执行或写入动作, the LoomiDBX Generator Framework shall 返回范围外错误并提示由 `spec-04` 处理。
 3. The LoomiDBX Generator Framework shall 通过 FFI/服务契约输出统一错误模型，不暴露连接凭据、密钥、token 等敏感信息。
 4. The LoomiDBX Generator Framework shall 暴露对 `spec-08/spec-09` 的扩展点（外部 feed 与计算字段），且不破坏 MVP 既有接口语义。
+

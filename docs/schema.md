@@ -664,16 +664,35 @@ func ScanSchema(connID *C.char, dbName *C.char, tableName *C.char) *C.char
 // 返回: {"ok": true, "data": ScanResult}
 // ScanResult 包含: scan_history_id, tables[], diff(若非首次扫描)
 
-//export GetTableConfig
-func GetTableConfig(tableSchemaID *C.char) *C.char
-// 返回表配置 + 所有字段的生成器配置 + 表间关系
+//export ListGeneratorCapabilities
+func ListGeneratorCapabilities(requestJSON *C.char) *C.char
+// 入参: {"connection_id?": "...", "field_type?": "..."}
+// 返回: {"ok": true, "data": {"generators": [...]}, "error": null}
 
-//export SaveTableGenConfig
-func SaveTableGenConfig(configJSON *C.char) *C.char
+//export GetFieldGeneratorCandidates
+func GetFieldGeneratorCandidates(requestJSON *C.char) *C.char
+// 入参: {"connection_id": "...", "table": "...", "column": "..."}
+// 返回: {"ok": true, "data": {"candidates": [...], "default_generator": "..."}, "error": null}
 
-//export SaveColumnGenConfig
-func SaveColumnGenConfig(configJSON *C.char) *C.char
-// 保存字段生成器配置，同时写入 confirmed_at = now
+//export SaveFieldGeneratorConfig
+func SaveFieldGeneratorConfig(configJSON *C.char) *C.char
+// 入参: {"connection_id":"...","table":"...","column":"...","generator_type":"...","generator_opts":{},"seed_policy":{},"null_policy":"...","is_enabled":true,"modified_source":"..."}
+// 返回: {"ok": true, "data": {"saved": true, "config_version": 2, "is_enabled": true, "modified_source": "...", "warnings": []}, "error": null}
+
+//export GetFieldGeneratorConfig
+func GetFieldGeneratorConfig(requestJSON *C.char) *C.char
+// 入参: {"connection_id": "...", "table": "...", "column": "..."}
+// 返回: {"ok": true, "data": {"config": {...}, "warnings": []}, "error": null}
+
+//export ValidateFieldGeneratorConfig
+func ValidateFieldGeneratorConfig(requestJSON *C.char) *C.char
+// 入参: {"connection_id":"...","draft_config":{...}}
+// 返回: {"ok": true, "data": {"valid": true, "errors": []}, "error": null}
+
+//export PreviewGeneration
+func PreviewGeneration(requestJSON *C.char) *C.char
+// 入参: {"connection_id":"...","scope":{"type":"field|table","table":"...","column":"..."},"seed":123,"sample_size":10}
+// 返回: {"ok": true, "data": {"samples": (scope.type=field -> [...]; scope.type=table -> {"column_name":[...]}), "metadata": {...}, "warnings": []}, "error": null}
 
 //export SaveTableRelation
 func SaveTableRelation(relationJSON *C.char) *C.char
@@ -747,7 +766,7 @@ TableConfigScreen（右侧 Tab，双击表节点打开）
             └── "预览 / 确认" 按钮
                     │ 点击确认
                     ▼
-            SaveColumnGenConfig ──FFI──► Go: 写 confirmed_at
+            SaveFieldGeneratorConfig ──FFI──► Go: 保存字段生成配置
 ```
 
 **UI 状态标识说明：**
