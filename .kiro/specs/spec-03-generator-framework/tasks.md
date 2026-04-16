@@ -47,40 +47,40 @@
   - 对 `SaveFieldGeneratorConfig`、`ValidateFieldGeneratorConfig`、`GetFieldGeneratorCandidates`、`PreviewGeneration` 在 `pending_rescan/pending_adjustment` 状态下短路返回 `FAILED_PRECONDITION`；对 `GetFieldGeneratorConfig` 保持成功并附带 `warnings[]`。
   - _Requirements: 3.4, 4.1, 5.3_
 
-- [ ] 4. 实现预览服务与可复现生成机制
-- [ ] 4.1 构建 `GeneratorPreviewService`，支持单字段/单表样本预览。
+- [x] 4. 实现预览服务与可复现生成机制
+- [x] 4.1 构建 `GeneratorPreviewService`，支持单字段/单表样本预览。
   - 预览路径严格禁止真实写入动作。
   - _Requirements: 4.1, 5.1_
-- [ ] 4.2 实现固定种子复现机制，确保同配置同输入可重复输出。
+- [x] 4.2 实现固定种子复现机制，确保同配置同输入可重复输出。
   - 处理生成器不支持确定性的降级提示。
   - _Requirements: 4.2, 4.3_
-- [ ] 4.3 处理外部依赖未就绪场景（外部 feed/计算字段上下文）。
+- [x] 4.3 处理外部依赖未就绪场景（外部 feed/计算字段上下文）。
   - 统一返回 `FAILED_PRECONDITION` 并指明上游依赖。
   - _Requirements: 4.4_
-- [ ] 4.4 实现 `scope=table` 预览部分失败策略（Partial Success）。
+- [x] 4.4 实现 `scope=table` 预览部分失败策略（Partial Success）。
   - 字段级失败不影响其他字段样本返回，禁止静默丢失失败/跳过字段。
   - _Requirements: 4.5_
-- [ ] 4.5 在 `scope=table` 响应中输出字段级结果清单 `field_results[]`。
+- [x] 4.5 在 `scope=table` 响应中输出字段级结果清单 `field_results[]`。
   - 至少包含 `field`、`status(ok|skipped|failed)`、`error_code?`、`warning?`，并与 `samples` 一致性校验。
   - _Requirements: 4.6_
-- [ ] 4.6 固化 `scope=table` 预览标准契约样例 `PREVIEW_TABLE_PARTIAL_SUCCESS_V1` 作为联调基线。
+- [x] 4.6 固化 `scope=table` 预览标准契约样例 `PREVIEW_TABLE_PARTIAL_SUCCESS_V1` 作为联调基线。
   - 样例定义以 `design.md` 为准，必须包含 `samples`、`metadata`、`warnings[]`、`field_results[]`，并明确 `status=ok` 字段与 `samples` 字段集合一致性规则。
   - _Requirements: 4.7, 5.1_
 - [ ] 4.7 显式固化预览 `metadata` 最小字段契约并完成输出校验。
   - `scope=field/table` 均需稳定返回 `generator_type`、参数摘要、`deterministic` 与 `warnings[]` 相关元信息（按范围输出），避免调用方依赖隐式字段。
   - _Requirements: 4.3, 5.1_
 
-- [ ] 5. 暴露 FFI 契约并强化边界与安全
-- [ ] 5.1 提供配置保存、配置查询、候选查询、预览、校验等接口并统一 JSON 外壳。
+- [x] 5. 暴露 FFI 契约并强化边界与安全
+- [x] 5.1 提供配置保存、配置查询、候选查询、预览、校验等接口并统一 JSON 外壳。
   - 统一错误码映射并保持契约稳定。
   - _Requirements: 3.4, 4.1, 4.3, 5.3_
-- [ ] 5.2 对跨表编排/写入类请求返回范围外错误，禁止职责泄漏到执行层。
+- [x] 5.2 对跨表编排/写入类请求返回范围外错误，禁止职责泄漏到执行层。
   - 错误文案明确提示由 `spec-04` 处理。
   - _Requirements: 5.1, 5.2_
-- [ ] 5.3 全链路脱敏，确保日志与响应不泄露凭据、密钥或 token。
+- [x] 5.3 全链路脱敏，确保日志与响应不泄露凭据、密钥或 token。
   - 增加敏感字段屏蔽测试样例。
   - _Requirements: 5.3_
-- [ ] 5.4 为 `spec-08/spec-09` 预留扩展契约点并保持 MVP 接口兼容。
+- [x] 5.4 为 `spec-08/spec-09` 预留扩展契约点并保持 MVP 接口兼容。
   - 定义 capability 字段与依赖就绪检查钩子。
   - _Requirements: 5.4_
 
