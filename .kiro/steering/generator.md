@@ -12,6 +12,16 @@ type: reference
 - 本文件仅保留稳定决策与高频约束，避免与详设重复维护。
 - 当本文件与 `docs/generator.md` 有冲突时，**以 `docs/generator.md` 为准**。
 
+## Authority Anchors（实现前必查）
+
+- 架构总览与边界：`docs/generator.md`（Context、统一接口、扩展性设计）
+- 公共配置与复用：`docs/generator.md`（CommonOptions、BaseGenerator、组合模式）
+- 类型体系与优先级：`docs/generator.md`（完整生成器类型、实现优先级）
+- 文件结构基线：`docs/generator.md`（关键文件结构）
+- 验证与性能口径：`docs/generator.md`（验证方案）
+
+实现前请先完成 dry run：评估任务影响面、对比设计差异、明确执行决策。
+
 ## 架构决策（必须遵守）
 
 - 统一接口：`Meta()`、`Generate(ctx, in)`、`GenerateBatch(ctx, in, count)`、`Reset()`。

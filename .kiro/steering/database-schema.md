@@ -9,6 +9,15 @@ type: reference
 
 **权威详设**：`docs/schema.md`（DDL、完整接口签名、语义规则表以该文档为准。）
 
+## Authority Anchors（实现前必查）
+
+- 存储层 DDL 与迁移基线：`docs/schema.md`（DDL、Migration、方言差异）
+- FFI 契约与 JSON 外壳：`docs/schema.md`（接口清单与请求/响应结构）
+- 扫描、Diff、同步与风险语义：`docs/schema.md`（扫描流程、Diff 呈现、ApplySchemaSync）
+- schema trust gate 行为：`docs/schema.md`（trusted / pending_rescan / pending_adjustment）
+
+实现前请先完成 dry run：评估影响面、核对权威设计、判定是否存在偏差。
+
 **updated_at**：2026-04-14 — 对齐 spec-02：仅维护当前 schema，扫描快照仅内存态，Diff 必须经 UI 呈现。
 
 ---
