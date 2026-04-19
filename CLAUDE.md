@@ -82,3 +82,14 @@ Kiro-style Spec Driven Development implementation on AI-DLC (AI Development Life
   - Update authority design to reflect the approved new truth.
 - Keep design and code synchronized. Avoid long-lived "known deviation" drift.
 
+“For every /kiro:spec-impl run, the agent MUST output the following sections in order:
+
+Authority Anchors
+
+Pre-Coding Dry Run
+
+Implementation Plan (Bound to Docs)
+
+Deviation Report
+
+Post-Implementation Conformance Check”
