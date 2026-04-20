@@ -1,0 +1,786 @@
+
+
+# CLAUDE.md (English)
+
+## AI-DLC & Spec-Driven Development
+
+Kiro-style Spec-Driven Development implementation on the AI Development Life Cycle (AI‑DLC).
+This document defines how the coding agent must use steering, specs, and docs to produce code that strictly follows design and structure.
+
+------
+
+## 1. Project Context
+
+## 1.1 Paths
+
+- Steering: `.kiro/steering/`
+- Specs: `.kiro/specs/`
+- Docs (authority designs): `docs/`
+- Skills (optional, doc-ified skills): `docs/skills/`
+
+## 1.2 Steering vs Specification vs Docs
+
+- **Steering** (`.kiro/steering/`)
+  Project-wide rules, constraints, and high-level context. Acts as long-term memory and routing: what exists, how it fits together, which docs/skills to consult.
+- **Specs** (`.kiro/specs/`)
+  Feature-level specifications and lifecycle. Covers requirements, design, tasks, and implementation status for each feature.
+- **Docs** (`docs/*.md`)
+  Authority-level design sources. Define domain models, flows, contracts, project structure, and non-negotiable constraints.
+- **Skills** (`docs/skills/*.md`, optional)
+  Refactored docs as small, focused “skills”: one domain area or pattern per file. Used for progressive disclosure and tighter attention for the current task.
+
+## 1.3 Active Specifications
+
+- Check `.kiro/specs/` for active specifications.
+- Use `/kiro:spec-status {feature}` to inspect status and history for a feature.
+
+------
+
+## 2. Language & Communication Guidelines
+
+- Think in English, generate responses in Simplified Chinese, unless the spec explicitly configures a different target language.
+- All Markdown content written to project files (e.g. `requirements.md`, `design.md`, `tasks.md`, `research.md`, validation reports) MUST use the target language configured in `spec.json.language`.
+- All output MUST be:
+  - Clear, concise, and audience-friendly.
+  - Written in short sentences and active voice.
+  - Avoid jargon unless essential; when a technical term is needed, explain it briefly in plain language in parentheses.
+- Before finalizing any written artifact (spec, design, tasks, dry run, deviation report), pause and ask:
+  “Can someone unfamiliar with this codebase quickly understand the intent?”
+  If not, revise for clarity, then save or output.
+
+------
+
+## 3. AI-DLC Minimal Workflow
+
+## 3.1 Phases
+
+- Phase 0 (optional, context):
+  - `/kiro:steering`
+  - `/kiro:steering-custom`
+- Phase 1 (Specification):
+  - `/kiro:spec-init "description"`
+  - `/kiro:spec-requirements {feature}`
+  - `/kiro:validate-gap {feature}` (optional, for existing codebase)
+  - `/kiro:spec-design {feature} [-y]`
+  - `/kiro:validate-design {feature}` (optional design review)
+  - `/kiro:spec-tasks {feature} [-y]`
+- Phase 2 (Implementation):
+  - `/kiro:spec-impl {feature} [tasks]`
+  - `/kiro:validate-impl {feature}` (optional validation after implementation)
+- Progress check (anytime):
+  - `/kiro:spec-status {feature}`
+
+## 3.2 Development Rules (High-Level)
+
+- 3‑phase approval workflow: Requirements → Design → Tasks → Implementation.
+- Human review is required at each phase; use `-y` only for explicit fast-track decisions.
+- Keep steering up to date and verify alignment with `/kiro:spec-status`.
+- Follow the user’s instructions precisely within scope, and act autonomously to gather necessary context and complete the requested work end‑to‑end in this run.
+- Ask questions only when essential information is missing or the instructions are critically ambiguous.
+
+------
+
+## 4. Steering Configuration & Skills Index
+
+## 4.1 Steering Configuration
+
+- Load the entire `.kiro/steering/` folder as project memory for context.
+- Default steering files:
+  - `product.md` – product vision, user stories, value.
+  - `tech.md` – technical stack, constraints, patterns.
+  - `structure.md` – project structure, layering, naming rules.
+- Custom steering files are supported and are managed via `/kiro:steering-custom`.
+
+## 4.2 Authority Anchors
+
+- Each relevant steering file MUST contain **Authority Anchors** that point to exact `docs/*.md` or `docs/skills/*.md` sections.
+
+- Example format (in steering file):
+
+  ```
+  text
+  Authority Anchors:
+  - docs/auth/login.md#http-api
+  - docs/structure/services.md#auth-service
+  - docs/skills/auth/login-flow.md
+  ```
+
+- When there is a conflict:
+
+  - `docs/` and `docs/skills/` (authority)
+
+    > active spec docs
+    >
+    > > steering summary
+    > >
+    > > > existing code shape.
+    > >
+    > > ## 4.3 Skills Index (Optional but Recommended)
+    > >
+    > > - Maintain a skill index in steering (e.g. `tech.md` or `structure.md`):
+    > >
+    > >   ```
+    > >   text
+    > >   Skills Index:
+    > >   - auth/login-flow  -> docs/skills/auth/login-flow.md
+    > >   - auth/token-lifecycle -> docs/skills/auth/token-lifecycle.md
+    > >   - billing/reconciliation-core -> docs/skills/billing/reconciliation-core.md
+    > >   ```
+    > >
+    > > - For each spec or task, reference skills by name instead of raw file paths when possible.
+    > >
+    > > ------
+    > >
+    > > ## 5. Behavioral Skills (Karpathy-Inspired)
+    > >
+    > > These apply across specification and implementation. They are concrete, enforceable rules.
+    > >
+    > > ## 5.1 Think Before Coding
+    > >
+    > > For every `/kiro:spec-design`, `/kiro:spec-tasks`, and `/kiro:spec-impl`:
+    > >
+    > > - Explicitly state key assumptions (1–3 items) about:
+    > >   - Requirements,
+    > >   - Domain behavior,
+    > >   - Constraints from docs/skills.
+    > > - If multiple interpretations or implementation paths exist:
+    > >   - List at least 2 options briefly.
+    > >   - Explain why one is chosen for now.
+    > > - If something in `docs/` or specs is unclear:
+    > >   - Stop, name what is confusing.
+    > >   - Ask for clarification instead of guessing silently.
+    > >
+    > > These assumptions should appear in either the spec design, tasks, or the Pre-Coding Dry Run section.
+    > >
+    > > ## 5.2 Simplicity First
+    > >
+    > > Within the boundaries of authority docs:
+    > >
+    > > - Implement the minimum code that solves the current spec and tasks.
+    > > - No speculative features, configurations, or flexibility that are not requested.
+    > > - No abstractions for single-use code (e.g. generic factories for one caller).
+    > > - Do not add error handling for scenarios declared impossible in docs.
+    > > - If you notice that a solution could be much shorter (e.g. 200 lines → 50 lines):
+    > >   - Prefer the simpler solution.
+    > >   - For non-trivial simplifications, briefly note the reasoning in the design or Dry Run.
+    > >
+    > > When docs already prescribe a complex structure, do not “simplify away” the required structure. Simplicity applies to decisions that are left open by design.
+    > >
+    > > ## 5.3 Surgical Changes
+    > >
+    > > When editing existing code in `/kiro:spec-impl`:
+    > >
+    > > - Touch only what is required by:
+    > >   - The current spec tasks, and
+    > >   - The Impact Surface defined in the Dry Run.
+    > > - Do NOT:
+    > >   - “Improve” adjacent code, comments, or formatting unrelated to this spec.
+    > >   - Refactor unrelated modules or flows unless explicitly requested.
+    > > - Match existing style, even if you personally would do it differently.
+    > > - If your changes create orphans (unused imports, variables, functions):
+    > >   - Remove only the orphans that your changes created.
+    > >   - Do not remove pre-existing dead code unless explicitly requested.
+    > > - All changed lines MUST be traceable to:
+    > >   - An item in the spec tasks, or
+    > >   - A clearly recorded deviation in the Deviation Report.
+    > >
+    > > If you must modify files outside the initial Impact Surface, you MUST update Impact Surface and record it in the Deviation Report.
+    > >
+    > > ## 5.4 Goal-Driven Execution
+    > >
+    > > For multi-step work:
+    > >
+    > > - Transform vague tasks into verifiable goals.
+    > >
+    > >   - “Add validation” → “Write tests for invalid inputs, then make them pass.”
+    > >   - “Fix the bug” → “Write a test that reproduces it, then make it pass.”
+    > >
+    > > - Before implementing, write a short plan:
+    > >
+    > >   ```
+    > >   text
+    > >   1) Step [X] → verify: [check or test]
+    > >   2) Step [Y] → verify: [check or test]
+    > >   3) Step [Z] → verify: [check or test]
+    > >   ```
+    > >
+    > > - Define 2–5 success criteria per spec-impl run and, during `/kiro:validate-impl`, explicitly confirm:
+    > >
+    > >   - Which criteria are met,
+    > >   - Which are pending or failed (and why).
+    > >
+    > > ------
+    > >
+    > > ## 6. Development SOP (Documentation‑First, Mandatory)
+    > >
+    > > This SOP is a **hard constraint**. Non-compliant runs are considered invalid and must be discarded or re-run.
+    > >
+    > > ## 6.1 Authority & Traceability
+    > >
+    > > - Treat `docs/*.md` and `docs/skills/*.md` as authority sources for:
+    > >
+    > >   - Domain behavior,
+    > >   - Flows,
+    > >   - Public contracts,
+    > >   - Project structure.
+    > >
+    > > - Steering is a concise summary layer and index; it MUST point to authority docs via Authority Anchors.
+    > >
+    > > - Conflict resolution priority:
+    > >
+    > >   ```
+    > >   text
+    > >   docs/ & docs/skills/ (authority)
+    > >     > active spec documents
+    > >     > steering summary
+    > >     > existing code shape
+    > >   ```
+    > >
+    > > ## 6.2 Project Structure Contract
+    > >
+    > > Define and obey a project structure contract (documented in `structure.md` and/or dedicated doc):
+    > >
+    > > - Allowed top-level directories and responsibilities (e.g. `src/`, `tests/`, `docs/`, `internal/`).
+    > > - Layering and location rules:
+    > >   - HTTP handlers, use-cases, repositories, domain models, etc.
+    > > - Naming conventions:
+    > >   - Service interfaces, implementations, DTOs, test files, etc.
+    > >
+    > > Rules:
+    > >
+    > > - Before creating any new file or directory:
+    > >   - Check it against the Project Structure Contract.
+    > > - Creating a file or directory that violates the contract is a deviation:
+    > >   - Classify as minor or major in the Deviation Report.
+    > >   - Do not hide structural deviations.
+    > >
+    > > ## 6.3 Mandatory Output Sections for `/kiro:spec-impl`
+    > >
+    > > Every implementation run MUST output the following sections in order:
+    > >
+    > > 1. **Authority Anchors**
+    > >
+    > >    - `Docs Sources:` (list of docs/ and/or skills used)
+    > >      - `docs/auth/login.md#http-api`
+    > >      - `docs/structure/services.md#auth-service`
+    > >      - `docs/skills/auth/login-flow.md`
+    > >
+    > > 2. **Pre-Coding Dry Run**
+    > >
+    > >    - `Assumptions:`
+    > >      Key assumptions about requirements / domain / constraints.
+    > >    - `Impact Surface:`
+    > >      Files/modules/tests to be created or modified.
+    > >    - `Design Delta:`
+    > >      Whether and where implementation will differ from authority design.
+    > >    - `Execution Decision:`
+    > >      Follow design exactly vs. request deviation handling.
+    > >
+    > >    If this Dry Run section is missing or incomplete, do NOT start coding.
+    > >
+    > > 3. **Implementation Plan (Bound to Docs)**
+    > >
+    > >    - A short ordered list of steps that explicitly reference authority docs/skills.
+    > >
+    > >    - Example:
+    > >
+    > >      ```
+    > >      text
+    > >      1) Implement HTTP handler in src/http/auth/login_handler.ts
+    > >         based on docs/auth/login.md#http-api.
+    > >      2) Implement use-case in src/app/auth/login_usecase.ts
+    > >         based on docs/skills/auth/login-flow.md.
+    > >      3) Add tests according to docs/auth/login.md#test-cases.
+    > >      ```
+    > >
+    > > 4. **Deviation Report**
+    > >
+    > >    - `Deviation Type:` `major | minor | none`
+    > >    - `Description:` what differs from docs/spec/structure.
+    > >    - `Reason:` why deviation is necessary.
+    > >    - `Impact Surface Changes:` any files touched beyond the original Impact Surface.
+    > >    - `Approval Status:` `pending | approved | rejected` (for human reviewers).
+    > >
+    > >    Any implementation without an explicit Deviation Report (even if `none`) is invalid.
+    > >
+    > > 5. **Post-Implementation Conformance Check**
+    > >
+    > >    - Provide a short checklist comparing final code against:
+    > >      - Project Structure Contract.
+    > >      - Authority docs (flows, contracts).
+    > >      - Defined success criteria.
+    > >    - For each item, mark `pass` / `fail` and explain failures briefly.
+    > >    - Any failed item MUST be reflected in the Deviation Report or TODOs.
+    > >
+    > > ## 6.4 Task Granularity Constraints
+    > >
+    > > - A single `/kiro:spec-impl` run MUST NOT:
+    > >   - Introduce or modify more than a configured number of files, or
+    > >   - Change more than a configured number of public endpoints/classes.
+    > > - If the planned Impact Surface is too large:
+    > >   - Split into multiple spec tasks and smaller implementation runs.
+    > > - This limits long-running, drifting implementations and keeps deviations observable.
+    > >
+    > > ## 6.5 Non-Compliance Is an Error
+    > >
+    > > Any implementation run that does not:
+    > >
+    > > - Reference relevant authority docs/skills in **Authority Anchors**,
+    > > - Provide a complete **Pre-Coding Dry Run**,
+    > > - Produce a **Deviation Report** (with `none` if truly no deviation),
+    > > - Run a **Post-Implementation Conformance Check**,
+    > >
+    > > MUST be considered invalid. The correct response is to:
+    > >
+    > > - Discard the result (do not merge),
+    > > - Or re-run the implementation with full SOP compliance.
+    > >
+    > > ------
+    > >
+    > > ## 7. Example: Spec-Impl Output Skeleton
+    > >
+    > > For a feature like `user-auth/login`, a compliant `/kiro:spec-impl` output skeleton:
+    > >
+    > > ```
+    > > text
+    > > Authority Anchors
+    > > - docs/auth/login.md#http-api
+    > > - docs/structure/services.md#auth-service
+    > > - docs/skills/auth/login-flow.md
+    > > 
+    > > Pre-Coding Dry Run
+    > > - Assumptions:
+    > >   - Login uses email + password only.
+    > >   - No MFA in this iteration.
+    > > - Impact Surface:
+    > >   - src/http/auth/login_handler.ts
+    > >   - src/app/auth/login_usecase.ts
+    > >   - tests/http/auth/login_handler.spec.ts
+    > > - Design Delta:
+    > >   - None, follow docs exactly.
+    > > - Execution Decision:
+    > >   - Proceed with authority design; no deviations planned.
+    > > 
+    > > Implementation Plan (Bound to Docs)
+    > > 1) Implement HTTP handler per docs/auth/login.md#http-api.
+    > > 2) Implement use-case per docs/skills/auth/login-flow.md.
+    > > 3) Add tests per docs/auth/login.md#test-cases.
+    > > 
+    > > Deviation Report
+    > > - Deviation Type: none
+    > > - Description: N/A
+    > > - Reason: N/A
+    > > - Impact Surface Changes: none
+    > > - Approval Status: pending (for human review)
+    > > 
+    > > Post-Implementation Conformance Check
+    > > - Project Structure Contract: pass
+    > > - HTTP contracts vs docs/auth/login.md#http-api: pass
+    > > - Flow vs docs/skills/auth/login-flow.md: pass
+    > > - Success Criteria:
+    > >   - Invalid credential tests: pass
+    > >   - Locked account tests: pass
+    > >   - Logging requirements: pass
+    > > ```
+    > >
+    > > ------
+    > >
+    > > # CLAUDE.md（中文）
+    > >
+    > > ## AI‑DLC 与规格驱动开发
+    > >
+    > > 在 AI‑DLC（AI 开发生命周期）中实现 Kiro 风格的规格驱动开发（Spec‑Driven Development）。
+    > > 本文件规定：Coding Agent 必须如何使用 Steering、Specs 和 Docs 来产出严格遵守设计与结构约束的代码。
+    > >
+    > > ------
+    > >
+    > > ## 1. 项目上下文
+    > >
+    > > ## 1.1 路径约定
+    > >
+    > > - Steering（项目级规则与上下文）：`.kiro/steering/`
+    > > - Specs（特性级规格）：`.kiro/specs/`
+    > > - Docs（权威设计文档）：`docs/`
+    > > - Skills（可选，将文档技能化后的文件）：`docs/skills/`
+    > >
+    > > ## 1.2 Steering / Spec / Docs 的角色
+    > >
+    > > - **Steering**（`.kiro/steering/`）
+    > >   项目级规则、约束与高层上下文，相当于“长期记忆 + 路由层”：系统里有什么、如何组合、当前任务应查阅哪些 docs/skills。
+    > > - **Specs**（`.kiro/specs/`）
+    > >   针对单个特性的规格与生命周期：需求、设计、任务拆分以及实现状态。
+    > > - **Docs**（`docs/*.md`）
+    > >   **权威级设计来源**，定义领域模型、业务流程、对外契约、项目结构以及必须遵守的约束。
+    > > - **Skills**（`docs/skills/*.md`，可选）
+    > >   将 docs 拆分为粒度更小的“技能文件”，每个文件聚焦一个子领域或模式，用于渐进式披露，在当前任务上集中注意力、降低 token 消耗。
+    > >
+    > > ## 1.3 激活中的规格
+    > >
+    > > - 在 `.kiro/specs/` 中查看当前激活的规格。
+    > > - 使用 `/kiro:spec-status {feature}` 查询特性级规格的状态与历史。
+    > >
+    > > ------
+    > >
+    > > ## 2. 语言与沟通规范
+    > >
+    > > - 默认“用英文思考，用简体中文输出”，除非 spec 中明确配置了其他目标语言。
+    > > - 所有写入项目文件的 Markdown 内容（如 `requirements.md`、`design.md`、`tasks.md`、`research.md`、验证报告等）必须使用 `spec.json.language` 配置的目标语言。
+    > > - 所有输出必须：
+    > >   - 表达清晰、简洁、对读者友好。
+    > >   - 使用短句与主动语态。
+    > >   - 避免不必要的行话；若必须使用技术术语，应在括号内给出简短的通俗解释。
+    > > - 在最终输出任何文档（规格、设计、任务、Dry Run、偏差报告）前，先自问：
+    > >   “对不熟悉本项目的人，是否能快速理解意图？”
+    > >   若答案是否定的，请先改写提炼，再保存或输出。
+    > >
+    > > ------
+    > >
+    > > ## 3. AI‑DLC 最小工作流
+    > >
+    > > ## 3.1 阶段划分
+    > >
+    > > - Phase 0（可选：加载上下文）：
+    > >   - `/kiro:steering`
+    > >   - `/kiro:steering-custom`
+    > > - Phase 1（规格阶段）：
+    > >   - `/kiro:spec-init "description"`
+    > >   - `/kiro:spec-requirements {feature}`
+    > >   - `/kiro:validate-gap {feature}`（可选，用于旧代码库差距分析）
+    > >   - `/kiro:spec-design {feature} [-y]`
+    > >   - `/kiro:validate-design {feature}`（可选，设计评审）
+    > >   - `/kiro:spec-tasks {feature} [-y]`
+    > > - Phase 2（实现阶段）：
+    > >   - `/kiro:spec-impl {feature} [tasks]`
+    > >   - `/kiro:validate-impl {feature}`（可选，实现后的验证）
+    > > - 进度查询（任意时刻）：
+    > >   - `/kiro:spec-status {feature}`
+    > >
+    > > ## 3.2 高层开发规则
+    > >
+    > > - 固定三阶段审批流程：需求 → 设计 → 任务 → 实现。
+    > > - 每一阶段都需要人工审查；使用 `-y` 表示“在充分知情下的有意加速通道”。
+    > > - 保持 Steering 内容与项目状态同步，并通过 `/kiro:spec-status` 校验一致性。
+    > > - 在用户的指令范围内严格执行，并在该范围内自主完成整条工作链：收集上下文 → 规划 → 实现 → 自检。
+    > > - 仅在关键信息缺失或指令存在严重歧义时提出澄清问题。
+    > >
+    > > ------
+    > >
+    > > ## 4. Steering 配置与 Skills 索引
+    > >
+    > > ## 4.1 Steering 配置
+    > >
+    > > - 将 `.kiro/steering/` 整个目录作为项目记忆载入，用于上下文与路由指导。
+    > > - 推荐的默认 Steering 文件：
+    > >   - `product.md` —— 产品愿景、用户场景与价值。
+    > >   - `tech.md` —— 技术栈、关键约束、推荐模式。
+    > >   - `structure.md` —— 项目结构、分层规则、命名约定。
+    > > - 支持通过 `/kiro:steering-custom` 管理自定义 steering 文件。
+    > >
+    > > ## 4.2 Authority Anchors（权威锚点）
+    > >
+    > > - 每个相关的 Steering 文件中必须包含 **Authority Anchors**，指向精确的 `docs/*.md` 或 `docs/skills/*.md` 章节或文件。
+    > >
+    > > - 推荐格式：
+    > >
+    > >   ```
+    > >   text
+    > >   Authority Anchors:
+    > >   - docs/auth/login.md#http-api
+    > >   - docs/structure/services.md#auth-service
+    > >   - docs/skills/auth/login-flow.md
+    > >   ```
+    > >
+    > > - 当不同层之间存在冲突时，权重优先级如下（从高到低）：
+    > >
+    > >   ```
+    > >   text
+    > >   docs/ 与 docs/skills/（权威设计）
+    > >     > 当前激活的 spec 文档
+    > >     > steering 概要
+    > >     > 现有代码形状
+    > >   ```
+    > >
+    > > ## 4.3 Skills 索引（可选但推荐）
+    > >
+    > > - 在某个 steering 文件（如 `tech.md` 或 `structure.md`）中维护技能索引：
+    > >
+    > >   ```
+    > >   text
+    > >   Skills Index:
+    > >   - auth/login-flow  -> docs/skills/auth/login-flow.md
+    > >   - auth/token-lifecycle -> docs/skills/auth/token-lifecycle.md
+    > >   - billing/reconciliation-core -> docs/skills/billing/reconciliation-core.md
+    > >   ```
+    > >
+    > > - Spec 与任务中，优先引用 Skill 名称，而不是直接写原始文件路径。
+    > >
+    > > ------
+    > >
+    > > ## 5. 行为 Skills（借鉴 Karpathy）
+    > >
+    > > 以下规则在规格阶段与实现阶段都生效，并且是**可执行约束**（而非抽象理念）。
+    > >
+    > > ## 5.1 Coding 之前先思考（Think Before Coding）
+    > >
+    > > 对于每一次 `/kiro:spec-design`、`/kiro:spec-tasks` 和 `/kiro:spec-impl`：
+    > >
+    > > - 显式写出 1–3 条关键假设，覆盖：
+    > >   - 需求理解、
+    > >   - 领域行为、
+    > >   - 来自 docs/skills 的约束。
+    > > - 当存在多种解读或实现路径时：
+    > >   - 简要列出至少 2 种方案。
+    > >   - 说明当前选择方案的理由。
+    > > - 若 `docs/` 或 Spec 中存在不清晰之处：
+    > >   - 停下来，明确指出“哪个地方不清楚”。
+    > >   - 提出澄清需求，而不是悄悄自行假设。
+    > >
+    > > 这些假设应体现在 Spec 设计、任务拆分或 Pre‑Coding Dry Run 中。
+    > >
+    > > ## 5.2 优先简单（Simplicity First）
+    > >
+    > > 在不违反权威设计的前提下：
+    > >
+    > > - 实现满足当前 Spec/任务的**最小必要代码**。
+    > > - 不实现尚未被请求的功能、配置或未来扩展。
+    > > - 不为“单处调用”的逻辑抽象出过度的接口/工厂/框架。
+    > > - 不为文档中声明“不可能发生”的场景编写复杂错误处理。
+    > > - 如果发现方案 A 明显比方案 B 精简（例如 200 行 → 50 行），且两者同样满足设计：
+    > >   - 优先选择更简单的方案。
+    > >   - 对于非显而易见的简化，可以在设计或 Dry Run 中简短记录原因。
+    > >
+    > > 注意：若 docs 已经规定了某种复杂结构，不允许以“追求简单”为由随意简化掉必要结构。
+    > > Simplicity 主要作用于设计未严格约束的决策空间。
+    > >
+    > > ## 5.3 精准修改（Surgical Changes）
+    > >
+    > > 在 `/kiro:spec-impl` 阶段编辑现有代码时：
+    > >
+    > > - 仅修改：
+    > >   - 当前 Spec 的任务中明确要求的内容，且
+    > >   - Pre‑Coding Dry Run 中 `Impact Surface` 指定的文件/模块/测试。
+    > > - 禁止：
+    > >   - 顺手“美化”或“重写”与当前任务无关的代码、注释、格式。
+    > >   - 未经请求地重构其他模块或流程。
+    > > - 保持与现有代码风格一致，即便你个人喜欢另一种风格。
+    > > - 如果你的修改产生了“孤儿内容”（未使用的 import、变量、函数等）：
+    > >   - 只删除由这次修改引入的孤儿。
+    > >   - 不删除历史遗留的死代码，除非明确收到相关指令。
+    > > - 每一行修改必须能追溯到：
+    > >   - Spec 任务项，或
+    > >   - Deviation Report 中清楚记录的偏差。
+    > >
+    > > 若必须修改初始 `Impact Surface` 之外的文件，必须：
+    > >
+    > > - 同步更新 `Impact Surface`，并
+    > > - 在 Deviation Report 中说明原因。
+    > >
+    > > ## 5.4 以目标为驱动（Goal-Driven Execution）
+    > >
+    > > 面对多步骤任务时：
+    > >
+    > > - 将模糊任务转为可验证目标：
+    > >
+    > >   - “增加校验” → “先写无效输入的测试，然后实现使其通过”。
+    > >   - “修 bug” → “先写一个能复现问题的测试，再修复并使其通过”。
+    > >
+    > > - 在实现前写出简短计划：
+    > >
+    > >   ```
+    > >   text
+    > >   1）步骤 [X] → 验证方式：[检查或测试]
+    > >   2）步骤 [Y] → 验证方式：[检查或测试]
+    > >   3）步骤 [Z] → 验证方式：[检查或测试]
+    > >   ```
+    > >
+    > > - 每次 `/kiro:spec-impl` 至少定义 2–5 条成功标准，并在 `/kiro:validate-impl` 中逐条确认：
+    > >
+    > >   - 哪些已满足；
+    > >   - 哪些未满足或失败，以及原因。
+    > >
+    > > ------
+    > >
+    > > ## 6. 开发 SOP（Documentation‑First，强制）
+    > >
+    > > 本 SOP 是**强制约束**。
+    > > 任何不符合本 SOP 的实现，都应被视为无效，需要丢弃或重新执行。
+    > >
+    > > ## 6.1 权威与可追溯性
+    > >
+    > > - 将 `docs/*.md` 与 `docs/skills/*.md` 视为以下内容的权威来源：
+    > >
+    > >   - 领域行为（业务规则）、
+    > >   - 业务流程、
+    > >   - 对外契约（函数签名、DTO 结构、API 协议等）、
+    > >   - 项目结构与关键约束。
+    > >
+    > > - Steering 是对权威文档的“浓缩与索引层”，必须通过 Authority Anchors 指向具体 docs/skills。
+    > >
+    > > - 各层冲突时，优先级如下（从高到低）：
+    > >
+    > >   ```
+    > >   text
+    > >   docs/ 与 docs/skills/（权威设计）
+    > >     > 当前激活的 spec 文档
+    > >     > steering 概要
+    > >     > 现有代码形状
+    > >   ```
+    > >
+    > > ## 6.2 项目结构契约（Project Structure Contract）
+    > >
+    > > 在 `structure.md` 或专门文档中定义并遵守项目结构契约，包括但不限于：
+    > >
+    > > - 允许的顶层目录及职责（如 `src/`、`tests/`、`docs/`、`internal/`）。
+    > > - 分层与放置规则：
+    > >   - HTTP handler、Use‑case、Repository、领域模型等分别位于何处。
+    > > - 命名约定：
+    > >   - Service 接口、实现类、DTO、测试文件等的命名规则。
+    > >
+    > > 规则要求：
+    > >
+    > > - 在创建任何新文件或新目录之前：
+    > >   - 必须对照 Project Structure Contract 进行自检。
+    > > - 若新建的文件或目录不符合结构契约：
+    > >   - 必须视为一次偏差（Deviation），在 Deviation Report 中标记为 minor 或 major；
+    > >   - 不允许悄然引入结构性偏差而不记录。
+    > >
+    > > ## 6.3 `/kiro:spec-impl` 的强制输出结构
+    > >
+    > > 每一次实现运行，必须按以下顺序输出完整结构：
+    > >
+    > > 1. **Authority Anchors（权威锚点）**
+    > >
+    > >    - `Docs Sources:` 列出本次实现依赖的 docs/ 与 skills：
+    > >      - `docs/auth/login.md#http-api`
+    > >      - `docs/structure/services.md#auth-service`
+    > >      - `docs/skills/auth/login-flow.md`
+    > >
+    > > 2. **Pre‑Coding Dry Run（编码前 Dry Run）**
+    > >
+    > >    - `Assumptions:`
+    > >      关键假设：需求、领域行为、约束。
+    > >    - `Impact Surface:`
+    > >      将要创建或修改的文件 / 模块 / 测试。
+    > >    - `Design Delta:`
+    > >      计划在哪些点偏离权威设计，或是否完全遵守。
+    > >    - `Execution Decision:`
+    > >      是完全按设计执行，还是需要走偏差处理流程。
+    > >
+    > >    若缺少 Dry Run，或内容明显不完整，则不允许进入实现阶段。
+    > >
+    > > 3. **Implementation Plan（与文档绑定的实现计划）**
+    > >
+    > >    - 用简短有序列表描述实现步骤，并明确引用相应 docs/skills。
+    > >
+    > >    - 示例：
+    > >
+    > >      ```
+    > >      text
+    > >      1）在 src/http/auth/login_handler.ts 中实现 HTTP handler，
+    > >         参考 docs/auth/login.md#http-api。
+    > >      2）在 src/app/auth/login_usecase.ts 中实现 use-case，
+    > >         参考 docs/skills/auth/login-flow.md。
+    > >      3）根据 docs/auth/login.md#test-cases 编写测试。
+    > >      ```
+    > >
+    > > 4. **Deviation Report（偏差报告）**
+    > >
+    > >    - `Deviation Type:` `major | minor | none`
+    > >    - `Description:` 与 docs/spec/结构契约不一致的具体点。
+    > >    - `Reason:` 偏差存在的原因。
+    > >    - `Impact Surface Changes:` 任意超出原始 `Impact Surface` 的修改。
+    > >    - `Approval Status:` `pending | approved | rejected`（供人工审查使用）。
+    > >
+    > >    即使“完全没有偏差”，也必须显式输出 `Deviation Type: none` 等字段。
+    > >    缺失 Deviation Report 即视为流程错误。
+    > >
+    > > 5. **Post‑Implementation Conformance Check（事后符合性检查）**
+    > >
+    > >    - 用简短 checklist 对最终代码进行对照检查，至少包含：
+    > >      - 是否符合 Project Structure Contract；
+    > >      - 对外契约是否与权威 docs 保持一致；
+    > >      - 控制流是否符合文档定义的主流程与关键异常路径；
+    > >      - 之前定义的成功标准是否达成。
+    > >    - 对每一项标记 `pass` / `fail`，对于 `fail` 做简短说明。
+    > >    - 所有未通过项应：
+    > >      - 反映在 Deviation Report 中，或
+    > >      - 以 TODO 形式明确记录。
+    > >
+    > > ## 6.4 任务粒度约束
+    > >
+    > > - 单次 `/kiro:spec-impl` 不应：
+    > >   - 引入或修改超过预设数量的文件，或
+    > >   - 改动超过预设数量的对外类 / 端点。
+    > > - 若预期 `Impact Surface` 过大：
+    > >   - 将任务拆分为多个较小的 spec‑tasks 与实现批次。
+    > > - 这样可以降低长时任务“跑飞”的概率，也更容易观察和控制偏差。
+    > >
+    > > ## 6.5 不符合 SOP 即视为错误
+    > >
+    > > 凡是未做到以下任一项的实现运行：
+    > >
+    > > - 在 **Authority Anchors** 中引用相关的权威 docs/skills；
+    > > - 提供完整的 **Pre‑Coding Dry Run**；
+    > > - 输出 **Deviation Report**（即使为 `none`）；
+    > > - 执行 **Post‑Implementation Conformance Check**，
+    > >
+    > > 均视为无效执行。正确的处理方式是：
+    > >
+    > > - 不将其结果合并入代码库；
+    > > - 或重新执行一次，确保严格遵守本 SOP。
+    > >
+    > > ------
+    > >
+    > > ## 7. 示例：一次符合规范的 Spec‑Impl 输出骨架
+    > >
+    > > 以特性 `user-auth/login` 为例，符合 SOP 的 `/kiro:spec-impl` 输出骨架可以是：
+    > >
+    > > ```
+    > > text
+    > > Authority Anchors
+    > > - docs/auth/login.md#http-api
+    > > - docs/structure/services.md#auth-service
+    > > - docs/skills/auth/login-flow.md
+    > > 
+    > > Pre-Coding Dry Run
+    > > - Assumptions:
+    > >   - 本迭代仅支持 email + password 登录。
+    > >   - 不涉及 MFA。
+    > > - Impact Surface:
+    > >   - src/http/auth/login_handler.ts
+    > >   - src/app/auth/login_usecase.ts
+    > >   - tests/http/auth/login_handler.spec.ts
+    > > - Design Delta:
+    > >   - 无，完全按文档实现。
+    > > - Execution Decision:
+    > >   - 按权威设计执行，不预期偏差。
+    > > 
+    > > Implementation Plan (Bound to Docs)
+    > > 1）在 src/http/auth/login_handler.ts 中实现 HTTP handler，
+    > >    参考 docs/auth/login.md#http-api。
+    > > 2）在 src/app/auth/login_usecase.ts 中实现 use-case，
+    > >    参考 docs/skills/auth/login-flow.md。
+    > > 3）根据 docs/auth/login.md#test-cases 编写测试。
+    > > 
+    > > Deviation Report
+    > > - Deviation Type: none
+    > > - Description: N/A
+    > > - Reason: N/A
+    > > - Impact Surface Changes: none
+    > > - Approval Status: pending（等待人工审查）
+    > > 
+    > > Post-Implementation Conformance Check
+    > > - Project Structure Contract：pass
+    > > - HTTP 契约 vs docs/auth/login.md#http-api：pass
+    > > - 流程 vs docs/skills/auth/login-flow.md：pass
+    > > - 成功标准：
+    > >   - 无效凭据测试：pass
+    > >   - 账户锁定场景测试：pass
+    > >   - 日志记录要求：pass
+    > > ```
+    > >
+    > > ------
+    > >
+    > > 如果你愿意，我可以在下一步帮你把现有项目的 `structure.md`、某个领域的 docs 示例，一起按“Skills 化 + SOP 输出模板”的方式做一套最小可运行的样板，方便你在 cc‑sdd 流程里直接试跑。
+    >
+    > 
